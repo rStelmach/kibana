@@ -41,19 +41,20 @@ ess_auth('Authentication', async ({ page }) => {
       await page.keyboard.press('Enter');
       await page.getByRole('button', { name: 'Log in' }).click();
     } else if (!(await cloudContinue.isVisible())) {
-      await page
-        .getByRole('button', { name: 'Log in with Elasticsearch' })
-        .click()
-        .catch(() => {});
-      if (
+      const userField = page.getByLabel('Username');
+      const passField = page.getByLabel('Password', { exact: true });
+
+      // If the classic username/password form is already visible, use it directly.
+      if (await userField.isVisible().catch(() => false)) {
+        await userField.fill(process.env.KIBANA_USERNAME);
+        await passField.fill(process.env.KIBANA_PASSWORD);
+        await page.getByRole('button', { name: /log in/i }).click();
+      } else {
+        // Otherwise try clicking whatever "Log in" button exists and hope the form appears
         await page
-          .getByLabel('Username')
-          .isVisible()
-          .catch(() => false)
-      ) {
-        await page.getByLabel('Username').fill(process.env.KIBANA_USERNAME);
-        await page.getByLabel('Password', { exact: true }).fill(process.env.KIBANA_PASSWORD);
-        await page.getByRole('button', { name: 'Log in' }).click();
+          .getByRole('button', { name: /log in/i })
+          .click()
+          .catch(() => {});
       }
     }
   } else {
