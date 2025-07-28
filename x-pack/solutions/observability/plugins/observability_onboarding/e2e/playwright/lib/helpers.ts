@@ -17,7 +17,9 @@ export async function waitForOneOf(locators: Locator[]): Promise<WaitForRes> {
   const res = await Promise.race([
     ...locators.map(async (locator, index): Promise<WaitForRes> => {
       let timedOut = false;
-      await locator.waitFor({ state: 'visible' }).catch(() => (timedOut = true));
+      await locator
+        .waitFor({ state: 'visible', timeout: 120_000 }) // allow up to 2 minutes for SAML/redirect pages
+        .catch(() => (timedOut = true));
       return [timedOut ? -1 : index, locator];
     }),
   ]);

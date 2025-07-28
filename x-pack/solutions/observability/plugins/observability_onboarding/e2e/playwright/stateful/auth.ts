@@ -22,7 +22,20 @@ ess_auth('Authentication', async ({ page }) => {
 
   if (isServerless) {
     const roleCombo = page.getByRole('combobox');
-    await roleCombo.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
+    const cloudContinue = page.getByRole('button', { name: /continue/i });
+
+    // wait for either the old combobox or the new Cloud "Continue" button
+    await Promise.any([
+      roleCombo.waitFor({ state: 'visible', timeout: 10_000 }),
+      cloudContinue.waitFor({ state: 'visible', timeout: 10_000 }),
+    ]).catch(() => {});
+
+    if (await cloudContinue.isVisible()) {
+      await cloudContinue.click();
+      // after clicking Continue we eventually land on the combo-box page
+      await roleCombo.waitFor({ state: 'visible', timeout: 60_000 });
+    }
+
     if (await roleCombo.isVisible()) {
       await roleCombo.fill('admin');
       await page.keyboard.press('Enter');
