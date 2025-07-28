@@ -6,6 +6,7 @@
  */
 
 import { expect, type Page, type Locator } from '@playwright/test';
+import { isServerless } from '../../../lib/helpers';
 
 export class AutoDetectFlowPage {
   page: Page;
@@ -20,9 +21,12 @@ export class AutoDetectFlowPage {
     this.copyToClipboardButton = this.page.getByTestId(
       'observabilityOnboardingCopyToClipboardButton'
     );
+    const readyText = isServerless
+      ? 'We are monitoring your cluster'
+      : 'Your data is ready to explore!';
     this.receivedDataIndicator = this.page
       .getByTestId('observabilityOnboardingAutoDetectPanelDataReceivedProgressIndicator')
-      .getByText('Your data is ready to explore!');
+      .getByText(readyText);
     this.autoDetectSystemIntegrationActionLink = this.page.getByTestId(
       'observabilityOnboardingDataIngestStatusActionLink-inventory-host-details'
     );

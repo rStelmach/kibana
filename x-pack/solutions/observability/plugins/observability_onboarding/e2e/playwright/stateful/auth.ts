@@ -7,11 +7,10 @@
 
 import { test as ess_auth, expect } from '@playwright/test';
 import { STORAGE_STATE } from '../playwright.config';
+import { isServerless } from '../lib/helpers';
 import { waitForOneOf } from '../lib/helpers';
 import { log } from '../lib/logger';
 import { assertEnv } from '../lib/assert_env';
-
-const isLocalCluster = process.env.CLUSTER_ENVIRONMENT === 'local';
 
 ess_auth('Authentication', async ({ page }) => {
   assertEnv(process.env.KIBANA_BASE_URL, 'KIBANA_BASE_URL is not defined.');
@@ -19,14 +18,22 @@ ess_auth('Authentication', async ({ page }) => {
   assertEnv(process.env.KIBANA_PASSWORD, 'KIBANA_PASSWORD is not defined.');
 
   await page.goto(process.env.KIBANA_BASE_URL);
-  log.info(`...waiting for login page elements to appear.`);
-  if (!isLocalCluster) {
+  log.info('Detecting login flow...');
+
+  if (isServerless) {
+    const roleCombo = page.getByRole('combobox');
+    await roleCombo.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
+    if (await roleCombo.isVisible()) {
+      await roleCombo.fill('admin');
+      await page.keyboard.press('Enter');
+      await page.getByRole('button', { name: 'Log in' }).click();
+    }
+  } else {
     await page.getByRole('button', { name: 'Log in with Elasticsearch' }).click();
+    await page.getByLabel('Username').fill(process.env.KIBANA_USERNAME);
+    await page.getByLabel('Password', { exact: true }).fill(process.env.KIBANA_PASSWORD);
+    await page.getByRole('button', { name: 'Log in' }).click();
   }
-  await page.getByLabel('Username').fill(process.env.KIBANA_USERNAME);
-  await page.getByLabel('Password', { exact: true }).click();
-  await page.getByLabel('Password', { exact: true }).fill(process.env.KIBANA_PASSWORD);
-  await page.getByRole('button', { name: 'Log in' }).click();
 
   const [index] = await waitForOneOf([
     page.getByTestId('helpMenuButton'),
