@@ -5,82 +5,69 @@
  * 2.0.
  */
 
-import { test as ess_auth, expect } from '@playwright/test';
+import { test as ess_auth, expect, type Page } from '@playwright/test';
 import { STORAGE_STATE } from '../playwright.config';
 import { isServerless } from '../lib/helpers';
 import { waitForOneOf } from '../lib/helpers';
 import { log } from '../lib/logger';
 import { assertEnv } from '../lib/assert_env';
 
+const isLocalCluster = process.env.CLUSTER_ENVIRONMENT === 'local';
+
 ess_auth('Authentication', async ({ page }) => {
   assertEnv(process.env.KIBANA_BASE_URL, 'KIBANA_BASE_URL is not defined.');
   assertEnv(process.env.KIBANA_USERNAME, 'KIBANA_USERNAME is not defined.');
   assertEnv(process.env.KIBANA_PASSWORD, 'KIBANA_PASSWORD is not defined.');
 
-  await page.goto(process.env.KIBANA_BASE_URL);
+  await page.goto(process.env.KIBANA_BASE_URL!);
   log.info('Detecting login flow...');
 
   if (isServerless) {
-    const roleCombo = page.getByRole('combobox');
-    const cloudContinue = page.getByRole('button', { name: /continue/i });
-
-    // wait for either the old combobox or the new Cloud "Continue" button
-    await Promise.any([
-      roleCombo.waitFor({ state: 'visible', timeout: 10_000 }),
-      cloudContinue.waitFor({ state: 'visible', timeout: 10_000 }),
-    ]).catch(() => {});
-
-    if (await cloudContinue.isVisible()) {
-      await cloudContinue.click();
-      // after clicking Continue we eventually land on the combo-box page
-      await roleCombo.waitFor({ state: 'visible', timeout: 60_000 });
-    }
-
-    if (await roleCombo.isVisible()) {
-      await roleCombo.fill('admin');
-      await page.keyboard.press('Enter');
-      await page.getByRole('button', { name: 'Log in' }).click();
-    } else if (!(await cloudContinue.isVisible())) {
-      const userField = page.getByLabel('Username');
-      const passField = page.getByLabel('Password', { exact: true });
-
-      // If the classic username/password form is already visible, use it directly.
-      if (await userField.isVisible().catch(() => false)) {
-        await userField.fill(process.env.KIBANA_USERNAME);
-        await passField.fill(process.env.KIBANA_PASSWORD);
-        await page.getByRole('button', { name: /log in/i }).click();
-      } else {
-        // Otherwise try clicking whatever "Log in" button exists and hope the form appears
-        await page
-          .getByRole('button', { name: /log in/i })
-          .click()
-          .catch(() => {});
-      }
-    }
+    await handleServerlessLogin(page);
   } else {
-    await page.getByRole('button', { name: 'Log in with Elasticsearch' }).click();
-    await page.getByLabel('Username').fill(process.env.KIBANA_USERNAME);
-    await page.getByLabel('Password', { exact: true }).fill(process.env.KIBANA_PASSWORD);
-    await page.getByRole('button', { name: 'Log in' }).click();
+    await handleStatefulLogin(page);
   }
 
-  const [index] = await waitForOneOf([
+  // Wait for Kibana UI or space selector or error
+  const [idx] = await waitForOneOf([
     page.getByTestId('helpMenuButton'),
     page.getByText('Select your space'),
     page.getByTestId('loginErrorMessage'),
   ]);
 
-  const spaceSelector = index === 1;
-  const isAuthenticated = index === 0;
-
-  if (isAuthenticated) {
+  if (idx === 0) {
+    // landed in Kibana
     await page.context().storageState({ path: STORAGE_STATE });
-  } else if (spaceSelector) {
+  } else if (idx === 1) {
+    // space selector shown – pick Default
     await page.getByRole('link', { name: 'Default' }).click();
     await expect(page.getByTestId('helpMenuButton')).toBeVisible();
     await page.context().storageState({ path: STORAGE_STATE });
   } else {
-    log.error('Username or password is incorrect.');
-    throw new Error('Authentication is failed.');
+    throw new Error('Authentication failed');
   }
 });
+
+async function handleServerlessLogin(page: Page) {
+  // Cloud login shows Email/Password + SSO. Use SSO.
+  const ssoBtn = page.getByRole('button', { name: 'SSO' });
+  if (await ssoBtn.isVisible().catch(() => false)) {
+    await ssoBtn.click();
+  }
+
+  // On the mock IdP page select admin role
+  const roleCombo = page.getByRole('combobox');
+  await roleCombo.waitFor({ state: 'visible', timeout: 60_000 });
+  await roleCombo.fill('admin');
+  await page.keyboard.press('Enter');
+  await page.getByRole('button', { name: 'Log in' }).click();
+}
+
+async function handleStatefulLogin(page: Page) {
+  if (!isLocalCluster) {
+    await page.getByRole('button', { name: 'Log in with Elasticsearch' }).click();
+  }
+  await page.getByLabel('Username').fill(process.env.KIBANA_USERNAME!);
+  await page.getByLabel('Password', { exact: true }).fill(process.env.KIBANA_PASSWORD!);
+  await page.getByRole('button', { name: 'Log in' }).click();
+}
