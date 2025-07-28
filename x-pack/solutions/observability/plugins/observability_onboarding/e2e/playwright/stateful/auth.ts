@@ -40,6 +40,21 @@ ess_auth('Authentication', async ({ page }) => {
       await roleCombo.fill('admin');
       await page.keyboard.press('Enter');
       await page.getByRole('button', { name: 'Log in' }).click();
+    } else if (!(await cloudContinue.isVisible())) {
+      await page
+        .getByRole('button', { name: 'Log in with Elasticsearch' })
+        .click()
+        .catch(() => {});
+      if (
+        await page
+          .getByLabel('Username')
+          .isVisible()
+          .catch(() => false)
+      ) {
+        await page.getByLabel('Username').fill(process.env.KIBANA_USERNAME);
+        await page.getByLabel('Password', { exact: true }).fill(process.env.KIBANA_PASSWORD);
+        await page.getByRole('button', { name: 'Log in' }).click();
+      }
     }
   } else {
     await page.getByRole('button', { name: 'Log in with Elasticsearch' }).click();
