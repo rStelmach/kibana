@@ -19,38 +19,13 @@ ess_auth('Authentication', async ({ page }) => {
   assertEnv(process.env.KIBANA_PASSWORD, 'KIBANA_PASSWORD is not defined.');
 
   await page.goto(process.env.KIBANA_BASE_URL);
-  log.info(`...waiting for login page elements to appear.`);
+  log.info('Detecting login flow...');
 
-  const elasticsearchBtn = page.getByRole('button', { name: 'Log in with Elasticsearch' });
-  if (!isLocalCluster && (await elasticsearchBtn.isVisible().catch(() => false))) {
-    await elasticsearchBtn.click();
+  if (process.env.CLUSTER_ENVIRONMENT?.toLowerCase() === 'serverless') {
+    await loginServerless(page);
+  } else {
+    await loginStateful(page);
   }
-
-  // -- Use placeholder-based selectors which exist on Elastic Cloud login page --
-  const emailField = page
-    .getByPlaceholder(/email/i)
-    .first()
-    .or(page.locator('input[type="email"]'))
-    .or(page.locator('form input').first());
-  const passwordField = page
-    .getByPlaceholder(/password/i)
-    .first()
-    .or(page.locator('input[type="password"]'));
-  const loginButton = page.getByRole('button', { name: /log in/i });
-
-  log.info('Filling email/username');
-  await emailField.fill(process.env.KIBANA_USERNAME);
-  await emailField.evaluate((el) => (el as HTMLElement).blur());
-
-  log.info('Filling password');
-  await passwordField.fill(process.env.KIBANA_PASSWORD);
-  await passwordField.evaluate((el) => (el as HTMLElement).blur());
-
-  log.info('Waiting for Login button to enable');
-  await expect(loginButton).toBeEnabled();
-
-  log.info('Clicking Login');
-  await loginButton.click();
 
   const [index] = await waitForOneOf([
     page.getByTestId('helpMenuButton'),
@@ -72,3 +47,38 @@ ess_auth('Authentication', async ({ page }) => {
     throw new Error('Authentication is failed.');
   }
 });
+
+async function loginStateful(page: import('@playwright/test').Page) {
+  if (!isLocalCluster) {
+    const elasticBtn = page.getByRole('button', { name: 'Log in with Elasticsearch' });
+    if (await elasticBtn.isVisible().catch(() => false)) {
+      await elasticBtn.click();
+    }
+  }
+
+  await page.getByLabel('Username').fill(process.env.KIBANA_USERNAME!);
+  await page.getByLabel('Password', { exact: true }).fill(process.env.KIBANA_PASSWORD!);
+  await page.getByRole('button', { name: 'Log in' }).click();
+}
+
+async function loginServerless(page: import('@playwright/test').Page) {
+  const emailInput = page
+    .getByPlaceholder(/email/i)
+    .first()
+    .or(page.locator('input[type="email"]'))
+    .or(page.locator('form input').first());
+  const passwordInput = page
+    .getByPlaceholder(/password/i)
+    .first()
+    .or(page.locator('input[type="password"]'));
+  const loginBtn = page.getByRole('button', { name: /log in/i });
+
+  await emailInput.fill(process.env.KIBANA_USERNAME!);
+  await emailInput.evaluate((el) => (el as HTMLElement).blur());
+
+  await passwordInput.fill(process.env.KIBANA_PASSWORD!);
+  await passwordInput.evaluate((el) => (el as HTMLElement).blur());
+
+  await expect(loginBtn).toBeEnabled();
+  await loginBtn.click();
+}
