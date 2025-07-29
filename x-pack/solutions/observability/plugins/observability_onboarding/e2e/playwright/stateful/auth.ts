@@ -21,11 +21,20 @@ ess_auth('Authentication', async ({ page }) => {
   await page.goto(process.env.KIBANA_BASE_URL);
   log.info('Detecting login flow...');
 
-  if (process.env.CLUSTER_ENVIRONMENT?.toLowerCase() === 'serverless') {
+  // Decide at runtime which form we’re on
+  const emailPlaceholder = page.getByPlaceholder(/email/i).first();
+
+  let usedFlow: 'serverless' | 'stateful';
+
+  if (await emailPlaceholder.isVisible({ timeout: 3_000 }).catch(() => false)) {
     await loginServerless(page);
+    usedFlow = 'serverless';
   } else {
     await loginStateful(page);
+    usedFlow = 'stateful';
   }
+
+  log.info(`Used ${usedFlow} login flow`);
 
   const [index] = await waitForOneOf([
     page.getByTestId('helpMenuButton'),
