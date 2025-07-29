@@ -21,7 +21,6 @@ ess_auth('Authentication', async ({ page }) => {
   await page.goto(process.env.KIBANA_BASE_URL);
   log.info('Detecting login flow...');
 
-  // Decide at runtime which form we’re on
   const emailPlaceholder = page.getByPlaceholder(/email/i).first();
 
   let usedFlow: 'serverless' | 'stateful';
@@ -58,16 +57,30 @@ ess_auth('Authentication', async ({ page }) => {
 });
 
 async function loginStateful(page: import('@playwright/test').Page) {
+  // First screen can be either direct form or the dual-button splash.
   if (!isLocalCluster) {
-    const elasticBtn = page.getByRole('button', { name: 'Log in with Elasticsearch' });
+    const elasticBtn = page.getByRole('button', { name: /Log in with Elasticsearch/i });
     if (await elasticBtn.isVisible().catch(() => false)) {
       await elasticBtn.click();
     }
   }
 
-  await page.getByLabel('Username').fill(process.env.KIBANA_USERNAME!);
-  await page.getByLabel('Password', { exact: true }).fill(process.env.KIBANA_PASSWORD!);
-  await page.getByRole('button', { name: 'Log in' }).click();
+  // Wait until the credential fields are actually rendered
+  const usernameField = page
+    .getByLabel('Username', { exact: true })
+    .or(page.getByPlaceholder(/email/i))
+    .first();
+  const passwordField = page
+    .getByLabel('Password', { exact: true })
+    .or(page.getByPlaceholder(/password/i))
+    .first();
+
+  await usernameField.waitFor({ state: 'visible', timeout: 15_000 });
+  await passwordField.waitFor({ state: 'visible', timeout: 15_000 });
+
+  await usernameField.fill(process.env.KIBANA_USERNAME!);
+  await passwordField.fill(process.env.KIBANA_PASSWORD!);
+  await page.getByRole('button', { name: /log in/i }).click();
 }
 
 async function loginServerless(page: import('@playwright/test').Page) {
