@@ -20,10 +20,21 @@ ess_auth('Authentication', async ({ page }) => {
 
   await page.goto(process.env.KIBANA_BASE_URL);
   log.info(`...waiting for login page elements to appear.`);
-  if (!isLocalCluster) {
-    await page.getByRole('button', { name: 'Log in with Elasticsearch' }).click();
+
+  const elasticsearchBtn = page.getByRole('button', { name: 'Log in with Elasticsearch' });
+  if (!isLocalCluster && (await elasticsearchBtn.isVisible().catch(() => false))) {
+    await elasticsearchBtn.click();
   }
-  await page.getByLabel('Username').fill(process.env.KIBANA_USERNAME);
+
+  const usernameField = page.getByLabel('Username');
+  const emailField = page.getByLabel('Email');
+
+  if (await usernameField.isVisible().catch(() => false)) {
+    await usernameField.fill(process.env.KIBANA_USERNAME);
+  } else if (await emailField.isVisible().catch(() => false)) {
+    await emailField.fill(process.env.KIBANA_USERNAME);
+  }
+
   await page.getByLabel('Password', { exact: true }).click();
   await page.getByLabel('Password', { exact: true }).fill(process.env.KIBANA_PASSWORD);
   await page.getByRole('button', { name: 'Log in' }).click();
