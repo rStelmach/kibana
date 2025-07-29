@@ -26,25 +26,44 @@ ess_auth('Authentication', async ({ page }) => {
     await elasticsearchBtn.click();
   }
 
-  const usernameField = page.getByLabel('Username');
-  const emailField = page.getByLabel('Email');
+  const usernameField = page.getByLabel('Username', { exact: true });
+  const emailLabelField = page.getByLabel('Email', { exact: true });
+  const emailPlaceholderField = page.getByPlaceholder('Email').first();
 
+  let emailFilled = false;
   if (await usernameField.isVisible().catch(() => false)) {
+    log.info('Filling "Username" labelled input');
     await usernameField.fill(process.env.KIBANA_USERNAME);
-  } else if (await emailField.isVisible().catch(() => false)) {
-    await emailField.fill(process.env.KIBANA_USERNAME);
+    await usernameField.evaluate((el) => (el as HTMLElement).blur());
+    emailFilled = true;
+  } else if (await emailLabelField.isVisible().catch(() => false)) {
+    log.info('Filling "Email" labelled input');
+    await emailLabelField.fill(process.env.KIBANA_USERNAME);
+    await emailLabelField.evaluate((el) => (el as HTMLElement).blur());
+    emailFilled = true;
+  } else if (await emailPlaceholderField.isVisible().catch(() => false)) {
+    log.info('Filling input with Email placeholder');
+    await emailPlaceholderField.fill(process.env.KIBANA_USERNAME);
+    await emailPlaceholderField.evaluate((el) => (el as HTMLElement).blur());
+    emailFilled = true;
   }
 
-  await page.getByLabel('Password', { exact: true }).click();
-  await page.getByLabel('Password', { exact: true }).fill(process.env.KIBANA_PASSWORD);
+  if (!emailFilled) {
+    throw new Error('Email/Username field not found');
+  }
 
-  // Wait a moment for the form to validate and enable the button
-  await page.waitForTimeout(1000);
+  log.info('Email/Username filled, moving to Password');
+
+  const passwordField = page.getByLabel('Password', { exact: true });
+  await passwordField.fill(process.env.KIBANA_PASSWORD);
+  await passwordField.evaluate((el) => (el as HTMLElement).blur());
+
+  log.info('Password filled, waiting for Login button');
 
   // Wait for the login button to be enabled before clicking
-  await page.getByRole('button', { name: 'Log in' }).waitFor({ state: 'visible' });
   await expect(page.getByRole('button', { name: 'Log in' })).toBeEnabled();
 
+  log.info('Login button enabled, clicking');
   await page.getByRole('button', { name: 'Log in' }).click();
 
   const [index] = await waitForOneOf([
