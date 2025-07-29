@@ -26,9 +26,17 @@ ess_auth('Authentication', async ({ page }) => {
     await elasticsearchBtn.click();
   }
 
-  const emailField = page.getByTestId('login-username');
-  const passwordField = page.getByTestId('login-password');
-  const loginButton = page.getByTestId('login-button');
+  // -- Use placeholder-based selectors which exist on Elastic Cloud login page --
+  const emailField = page
+    .getByPlaceholder(/email/i)
+    .first()
+    .or(page.locator('input[type="email"]'))
+    .or(page.locator('form input').first());
+  const passwordField = page
+    .getByPlaceholder(/password/i)
+    .first()
+    .or(page.locator('input[type="password"]'));
+  const loginButton = page.getByRole('button', { name: /log in/i });
 
   log.info('Filling email/username');
   await emailField.fill(process.env.KIBANA_USERNAME);
