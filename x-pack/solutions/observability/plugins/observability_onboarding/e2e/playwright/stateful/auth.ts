@@ -37,6 +37,14 @@ ess_auth('Authentication', async ({ page }) => {
 
   await page.getByLabel('Password', { exact: true }).click();
   await page.getByLabel('Password', { exact: true }).fill(process.env.KIBANA_PASSWORD);
+
+  // Wait a moment for the form to validate and enable the button
+  await page.waitForTimeout(1000);
+
+  // Wait for the login button to be enabled before clicking
+  await page.getByRole('button', { name: 'Log in' }).waitFor({ state: 'visible' });
+  await expect(page.getByRole('button', { name: 'Log in' })).toBeEnabled();
+
   await page.getByRole('button', { name: 'Log in' }).click();
 
   const [index] = await waitForOneOf([
