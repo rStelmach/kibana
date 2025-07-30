@@ -62,13 +62,28 @@ async function loginStateful(page: import('@playwright/test').Page) {
   if (!isLocalCluster) {
     const elasticBtn = page.getByRole('button', { name: /Log in with Elasticsearch/i });
     if (await elasticBtn.isVisible().catch(() => false)) {
-      await elasticBtn.click();
+      log.info('Clicking "Log in with Elasticsearch" button');
+      await Promise.all([
+        // form switches in the same tab; wait until username input becomes visible
+        page.waitForSelector('[data-test-subj=loginUsername]', {
+          state: 'visible',
+          timeout: 30_000,
+        }),
+        elasticBtn.click(),
+      ]);
     }
   }
 
-  await page.getByLabel('Username').fill(process.env.KIBANA_USERNAME!);
-  await page.getByLabel('Password', { exact: true }).fill(process.env.KIBANA_PASSWORD!);
-  await page.getByRole('button', { name: 'Log in' }).click();
+  // Credential inputs (use data-test-subj, present in every variant)
+  const usernameField = page.getByTestId('loginUsername');
+  const passwordField = page.getByTestId('loginPassword');
+
+  await usernameField.waitFor({ state: 'visible', timeout: 30_000 });
+  await passwordField.waitFor({ state: 'visible', timeout: 30_000 });
+
+  await usernameField.fill(process.env.KIBANA_USERNAME!);
+  await passwordField.fill(process.env.KIBANA_PASSWORD!);
+  await page.getByRole('button', { name: /log in/i }).click();
 }
 
 async function loginServerless(page: import('@playwright/test').Page) {
