@@ -21,7 +21,9 @@ ess_auth('Authentication', async ({ page }) => {
   await page.goto(process.env.KIBANA_BASE_URL);
   log.info('Detecting login flow...');
 
+  // Decide at runtime which form we’re on
   const emailPlaceholder = page.getByPlaceholder(/email/i).first();
+  const elasticBtn = page.getByRole('button', { name: /Log in with Elasticsearch/i });
 
   let usedFlow: 'serverless' | 'stateful';
 
@@ -57,42 +59,16 @@ ess_auth('Authentication', async ({ page }) => {
 });
 
 async function loginStateful(page: import('@playwright/test').Page) {
-  // First screen can be either direct form or the dual-button splash.
   if (!isLocalCluster) {
     const elasticBtn = page.getByRole('button', { name: /Log in with Elasticsearch/i });
     if (await elasticBtn.isVisible().catch(() => false)) {
-      log.info('Clicking "Log in with Elasticsearch" button');
-      await Promise.all([
-        page.waitForLoadState('networkidle'), // navigation / render finishes
-        elasticBtn.click(),
-      ]);
-      log.info('Navigation after click finished');
+      await elasticBtn.click();
     }
   }
 
-  // Wait until the credential fields are actually rendered
-  const usernameField = page
-    .getByLabel('Username', { exact: true })
-    .or(page.getByPlaceholder(/email/i))
-    .first();
-  const passwordField = page
-    .getByLabel('Password', { exact: true })
-    .or(page.getByPlaceholder(/password/i))
-    .first();
-
-  log.info('Waiting for username/email input to be visible');
-  await usernameField.waitFor({ state: 'visible', timeout: 30_000 });
-  log.info('Username/email input visible');
-
-  log.info('Waiting for password input to be visible');
-  await passwordField.waitFor({ state: 'visible', timeout: 30_000 });
-  log.info('Password input visible');
-
-  log.info('Filling credentials');
-  await usernameField.fill(process.env.KIBANA_USERNAME!);
-  await passwordField.fill(process.env.KIBANA_PASSWORD!);
-  await page.getByRole('button', { name: /log in/i }).click();
-  log.info('Clicked "Log in" button, awaiting post-login page');
+  await page.getByLabel('Username').fill(process.env.KIBANA_USERNAME!);
+  await page.getByLabel('Password', { exact: true }).fill(process.env.KIBANA_PASSWORD!);
+  await page.getByRole('button', { name: 'Log in' }).click();
 }
 
 async function loginServerless(page: import('@playwright/test').Page) {
