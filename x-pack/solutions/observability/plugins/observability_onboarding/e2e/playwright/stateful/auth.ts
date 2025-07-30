@@ -60,21 +60,21 @@ ess_auth('Authentication', async ({ page }) => {
 
 async function loginStateful(page: import('@playwright/test').Page) {
   if (!isLocalCluster) {
-    const elasticBtn = page.getByRole('button', { name: /Log in with Elasticsearch/i });
-    if (await elasticBtn.isVisible().catch(() => false)) {
-      log.info('Clicking "Log in with Elasticsearch" button');
-      await Promise.all([
-        // form switches in the same tab; wait until username input becomes visible
-        page.waitForSelector('[data-test-subj=loginUsername]', {
-          state: 'visible',
-          timeout: 30_000,
-        }),
-        elasticBtn.click(),
-      ]);
+    const basicCard = page.locator('[data-test-subj^="loginCard-basic"]').first();
+
+    const cardIsVisible = await basicCard
+      .waitFor({ state: 'visible', timeout: 30_000 })
+      .then(() => true)
+      .catch(() => false);
+
+    if (cardIsVisible) {
+      log.info('Clicking "Log in with Elasticsearch" selector card');
+      await basicCard.click();
+    } else {
+      log.info('Login selector not found, proceeding with existing form');
     }
   }
 
-  // Credential inputs (use data-test-subj, present in every variant)
   const usernameField = page.getByTestId('loginUsername');
   const passwordField = page.getByTestId('loginPassword');
 
