@@ -61,7 +61,12 @@ async function loginStateful(page: import('@playwright/test').Page) {
   if (!isLocalCluster) {
     const elasticBtn = page.getByRole('button', { name: /Log in with Elasticsearch/i });
     if (await elasticBtn.isVisible().catch(() => false)) {
-      await elasticBtn.click();
+      log.info('Clicking "Log in with Elasticsearch" button');
+      await Promise.all([
+        page.waitForLoadState('networkidle'), // navigation / render finishes
+        elasticBtn.click(),
+      ]);
+      log.info('Navigation after click finished');
     }
   }
 
@@ -75,12 +80,19 @@ async function loginStateful(page: import('@playwright/test').Page) {
     .or(page.getByPlaceholder(/password/i))
     .first();
 
-  await usernameField.waitFor({ state: 'visible', timeout: 15_000 });
-  await passwordField.waitFor({ state: 'visible', timeout: 15_000 });
+  log.info('Waiting for username/email input to be visible');
+  await usernameField.waitFor({ state: 'visible', timeout: 30_000 });
+  log.info('Username/email input visible');
 
+  log.info('Waiting for password input to be visible');
+  await passwordField.waitFor({ state: 'visible', timeout: 30_000 });
+  log.info('Password input visible');
+
+  log.info('Filling credentials');
   await usernameField.fill(process.env.KIBANA_USERNAME!);
   await passwordField.fill(process.env.KIBANA_PASSWORD!);
   await page.getByRole('button', { name: /log in/i }).click();
+  log.info('Clicked "Log in" button, awaiting post-login page');
 }
 
 async function loginServerless(page: import('@playwright/test').Page) {
