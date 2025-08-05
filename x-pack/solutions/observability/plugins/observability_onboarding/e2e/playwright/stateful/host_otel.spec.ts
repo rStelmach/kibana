@@ -45,7 +45,7 @@ test('Otel Host', async ({ page, onboardingHomePage, otelHostFlowPage, hostsOver
    * 3 minutes should be enough for the collector
    * to initialize and start ingesting data.
    */
-  await page.waitForTimeout(3 * 60000);
+  await page.waitForTimeout(10 * 60000);
 
   await otelHostFlowPage.clickHostsOverviewCTA();
   await hostsOverviewPage.assertCpuPercentageNotEmpty();

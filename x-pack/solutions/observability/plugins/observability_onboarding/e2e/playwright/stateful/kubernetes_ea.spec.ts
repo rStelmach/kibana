@@ -55,7 +55,7 @@ test('Kubernetes EA', async ({
    * the issue. 2 minutes is generous and should be more then enough
    * for the data to propagate everywhere.
    */
-  await page.waitForTimeout(2 * 60000);
+  await page.waitForTimeout(10 * 60000);
 
   await kubernetesEAFlowPage.clickKubernetesAgentCTA();
 
