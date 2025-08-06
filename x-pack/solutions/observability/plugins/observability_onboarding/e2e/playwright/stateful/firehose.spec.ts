@@ -52,7 +52,7 @@ test('Firehose', async ({ page, onboardingHomePage, firehoseFlowPage }) => {
    * 5 minutes should be enough for the cloudformation
    * stack to be created and to start pushing data.
    */
-  await page.waitForTimeout(10 * 60000);
+  await page.waitForTimeout(1 * 60000);
 
   await expect(
     firehoseFlowPage.awsServiceReceivedDataItemList.first(),
