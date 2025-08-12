@@ -27,6 +27,8 @@ const INSTRUMENTED_APP_NAME = 'java-app';
 test('Otel Kubernetes', async ({ page, onboardingHomePage, otelKubernetesFlowPage }) => {
   assertEnv(process.env.ARTIFACTS_FOLDER, 'ARTIFACTS_FOLDER is not defined.');
 
+  const isServerless = process.env.CLUSTER_ENVIRONMENT === 'serverless';
+
   const fileName = 'code_snippet_otel_kubernetes.sh';
   const outputPath = path.join(__dirname, '..', process.env.ARTIFACTS_FOLDER, fileName);
 
@@ -81,6 +83,12 @@ test('Otel Kubernetes', async ({ page, onboardingHomePage, otelKubernetesFlowPag
   const apmServiceInventoryPage = new ApmServiceInventoryPage(
     await otelKubernetesFlowPage.openServiceInventoryInNewTab()
   );
-  await apmServiceInventoryPage.page.getByTestId('serviceLink_opentelemetry/java/elastic').click();
+  
+  // Use different service link based on environment
+  const serviceTestId = isServerless 
+    ? 'serviceLink_java'                           // Serverless: Java agent pattern
+    : 'serviceLink_opentelemetry/java/elastic';    // Stateful: Current pattern
+  
+  await apmServiceInventoryPage.page.getByTestId(serviceTestId).click();
   await apmServiceInventoryPage.assertTransactionExists();
 });
