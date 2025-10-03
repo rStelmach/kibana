@@ -333,20 +333,33 @@ async function getDataStreamsInfoForPattern({
   esClient: ElasticsearchClient;
   pattern: DatasetIndexPattern;
 }): Promise<IndexBasicInfo[]> {
-  const resp = await esClient.indices.getDataStream({
-    name: pattern.pattern,
-    expand_wildcards: 'all',
-  });
+  try {
+    const resp = await esClient.indices.getDataStream({
+      name: pattern.pattern,
+      expand_wildcards: 'all',
+    });
 
-  return resp.data_streams.map((dataStream) => ({
-    patternName: pattern.patternName,
-    shipper: pattern.shipper,
-    isDataStream: true,
-    name: dataStream.name,
-    indices: dataStream.indices.map((index) => index.index_name),
-    mapping: undefined,
-    meta: dataStream._meta,
-  }));
+    return resp.data_streams.map((dataStream) => ({
+      patternName: pattern.patternName,
+      shipper: pattern.shipper,
+      isDataStream: true,
+      name: dataStream.name,
+      indices: dataStream.indices.map((index) => index.index_name),
+      mapping: undefined,
+      meta: dataStream._meta,
+    }));
+  } catch (e) {
+    const err = e;
+    const isUnknownResource =
+      err?.statusCode === 404 &&
+      (err?.meta?.body?.message === 'Unknown resource.' ||
+        err?.meta?.body?.ok === false ||
+        /Unknown resource/i.test(err?.message ?? ''));
+    if (isUnknownResource) {
+      return [];
+    }
+    throw e;
+  }
 }
 
 async function getIndicesInfoForPattern({
@@ -623,6 +636,15 @@ async function safeEsCall<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (error) {
+    const err = error as any;
+    const isUnknownResource =
+      err?.statusCode === 404 &&
+      (err?.meta?.body?.message === 'Unknown resource.' ||
+        err?.meta?.body?.ok === false ||
+        /Unknown resource/i.test(err?.message ?? ''));
+    if (isUnknownResource) {
+      return {} as T;
+    }
     throw error;
   }
 }
