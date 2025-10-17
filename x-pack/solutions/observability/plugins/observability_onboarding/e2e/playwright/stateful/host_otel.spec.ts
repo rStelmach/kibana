@@ -24,6 +24,10 @@ test('Otel Host', async ({ page, onboardingHomePage, otelHostFlowPage, hostsOver
   await onboardingHomePage.selectHostUseCase();
   await onboardingHomePage.selectOtelHostQuickstart();
 
+  if (process.env.OS_NAME === 'darwin') {
+    await otelHostFlowPage.selectPlatform('Mac');
+  }
+
   await otelHostFlowPage.copyCollectorDownloadSnippetToClipboard();
   const collectorDownloadSnippet = (await page.evaluate(
     'navigator.clipboard.readText()'
