@@ -7,8 +7,12 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { exec as execCb } from 'node:child_process';
+import { promisify } from 'node:util';
 import { test } from './fixtures/base_page';
 import { assertEnv } from '../lib/assert_env';
+
+const exec = promisify(execCb);
 
 test.beforeEach(async ({ page }) => {
   await page.goto(`${process.env.KIBANA_BASE_URL}/app/observabilityOnboarding`);
@@ -43,6 +47,9 @@ test('Otel Host', async ({ page, onboardingHomePage, otelHostFlowPage, hostsOver
    * to be created and then executes it
    */
   fs.writeFileSync(outputPath, codeSnippet);
+
+  // Start ingestion immediately within the test so KPIs populate before assertions.
+  await exec(`bash -lc "chmod +x '${outputPath}' && bash '${outputPath}'"`);
 
   /**
    * There is no explicit data ingest indication
