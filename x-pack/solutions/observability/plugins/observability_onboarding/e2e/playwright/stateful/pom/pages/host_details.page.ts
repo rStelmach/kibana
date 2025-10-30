@@ -22,6 +22,11 @@ export class HostDetailsPage {
 
   public async assertCpuPercentageNotEmpty() {
     await expect(this.cpuPercentageValue).toBeVisible();
-    expect(await this.cpuPercentageValue.textContent()).toMatch(/\d+%$/);
+    await expect
+      .poll(
+        async () => (await this.cpuPercentageValue.textContent())?.trim(),
+        { timeout: 120000, intervals: [1000, 2000, 5000] }
+      )
+      .toMatch(/\d+%$/);
   }
 }
