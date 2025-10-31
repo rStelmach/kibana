@@ -56,6 +56,7 @@ export {
   OS_NAME,
   SYSTEM_INTEGRATION,
   HOST_METRICS_RECEIVER_OTEL,
+  HOST_METRICS_OTEL_DATASETS,
 } from './constants';
 
 export {

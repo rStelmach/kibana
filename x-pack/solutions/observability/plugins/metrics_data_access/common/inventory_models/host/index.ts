@@ -13,7 +13,7 @@ import type { DataSchemaFormat } from '../types';
 import {
   DATASTREAM_DATASET,
   EVENT_MODULE,
-  HOST_METRICS_RECEIVER_OTEL,
+  HOST_METRICS_OTEL_DATASETS,
   METRICSET_MODULE,
   SYSTEM_INTEGRATION,
 } from '../../constants';
@@ -74,8 +74,8 @@ export const host = createInventoryModel('host', {
             : {
                 filter: [
                   {
-                    term: {
-                      [DATASTREAM_DATASET]: HOST_METRICS_RECEIVER_OTEL,
+                    terms: {
+                      [DATASTREAM_DATASET]: HOST_METRICS_OTEL_DATASETS,
                     },
                   },
                 ],

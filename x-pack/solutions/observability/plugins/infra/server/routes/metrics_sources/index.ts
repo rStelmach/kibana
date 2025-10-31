@@ -22,6 +22,7 @@ import {
   findInventoryFields,
   findInventoryModel,
   METRICSET_MODULE,
+  HOST_METRICS_OTEL_DATASETS,
 } from '@kbn/metrics-data-access-plugin/common';
 import {
   getHasDataQueryParamsRT,
@@ -256,7 +257,7 @@ export const initMetricsSourceConfigurationRoutes = (libs: InfraBackendLibs) => 
                   ? [
                       ...termQuery(EVENT_MODULE, hostIntegration.beats),
                       ...termQuery(METRICSET_MODULE, hostIntegration.beats),
-                      ...termQuery(DATASTREAM_DATASET, hostIntegration.otel),
+                      ...termsQuery(DATASTREAM_DATASET, ...HOST_METRICS_OTEL_DATASETS),
                     ]
                   : [],
               minimum_should_match: 1,
@@ -346,7 +347,7 @@ export const initMetricsSourceConfigurationRoutes = (libs: InfraBackendLibs) => 
               query: {
                 bool: {
                   filter: [
-                    ...termQuery(DATASTREAM_DATASET, inventoryModel.requiredIntegration.otel),
+                    ...termsQuery(DATASTREAM_DATASET, ...HOST_METRICS_OTEL_DATASETS),
                     ...rangeQuery(from, to),
                     ...kqlQuery(kuery),
                     ...(filters ? [filters] : []),
