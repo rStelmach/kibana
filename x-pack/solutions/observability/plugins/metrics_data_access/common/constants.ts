@@ -28,3 +28,8 @@ export const OS_NAME = 'os.name';
 // integrations
 export const SYSTEM_INTEGRATION = 'system';
 export const HOST_METRICS_RECEIVER_OTEL = 'hostmetricsreceiver.otel';
+// Some OTEL distributions use an alternate dataset naming for hostmetrics
+export const HOST_METRICS_OTEL_DATASETS = [
+  'hostmetricsreceiver.otel',
+  'otelcol.hostmetrics',
+];
