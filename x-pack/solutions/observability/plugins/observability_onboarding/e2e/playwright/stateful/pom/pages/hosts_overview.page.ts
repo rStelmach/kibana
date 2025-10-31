@@ -20,10 +20,23 @@ export class HostsOverviewPage {
       .locator('.echMetricText__value');
   }
 
+  private async waitForTextMatch(locator: Locator, re: RegExp, timeoutMs = 180000) {
+    const start = Date.now();
+    let last = '';
+    let delay = 1000;
+
+    while (Date.now() - start < timeoutMs) {
+      last = (await locator.textContent())?.trim() ?? '';
+      if (re.test(last)) return last;
+      await this.page.waitForTimeout(delay);
+      if (delay < 10000) delay *= 2;
+    }
+
+    expect(last).toMatch(re);
+  }
+
   public async assertCpuPercentageNotEmpty() {
     await expect(this.cpuPercentageValue).toBeVisible();
-    await this.page.waitForTimeout(90000); // give metrics time to arrive
-    const text = (await this.cpuPercentageValue.textContent())?.trim() ?? '';
-    expect(text).toMatch(/\d+%$/);
+    await this.waitForTextMatch(this.cpuPercentageValue, /\d+%$/);
   }
 }

@@ -47,10 +47,9 @@ test('Otel Host', async ({ page, onboardingHomePage, otelHostFlowPage, hostsOver
   /**
    * There is no explicit data ingest indication
    * in the flow, so we need to rely on a timeout.
-   * 3 minutes should be enough for the collector
-   * to initialize and start ingesting data.
+   * 4 minutes to give macOS runners extra time to start ingesting.
    */
-  await page.waitForTimeout(3 * 60000);
+  await page.waitForTimeout(4 * 60000);
 
   if (!isLogsEssentialsMode) {
     await otelHostFlowPage.clickHostsOverviewCTA();
