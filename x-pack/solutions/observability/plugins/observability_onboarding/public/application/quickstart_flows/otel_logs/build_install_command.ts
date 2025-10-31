@@ -34,6 +34,13 @@ export function buildInstallCommand({
   const elasticEndpointVarName = isManagedOtlpServiceAvailable
     ? 'ELASTIC_OTLP_ENDPOINT'
     : 'ELASTIC_ENDPOINT';
+  // Speed up first CPU utilization by lowering scrape interval when hostmetrics are enabled
+  const intervalTweakLinux = isMetricsOnboardingEnabled
+    ? " && sed -i 's/collection_interval: 60s/collection_interval: 15s/' ./otel.yml"
+    : '';
+  const intervalTweakMac = isMetricsOnboardingEnabled
+    ? " && sed -i '' 's/collection_interval: 60s/collection_interval: 15s/' ./otel.yml"
+    : '';
 
   switch (platform) {
     case 'linux':
@@ -41,13 +48,81 @@ export function buildInstallCommand({
 
 curl --output elastic-distro-${agentVersion}-linux-$arch.tar.gz --url https://${AGENT_CDN_BASE_URL}/elastic-agent-${agentVersion}-linux-$arch.tar.gz --proto '=https' --tlsv1.2 -fL && mkdir -p elastic-distro-${agentVersion}-linux-$arch && tar -xvf elastic-distro-${agentVersion}-linux-$arch.tar.gz -C "elastic-distro-${agentVersion}-linux-$arch" --strip-components=1 && cd elastic-distro-${agentVersion}-linux-$arch
 
-rm ./otel.yml && cp ${sampleConfigurationPath} ./otel.yml && mkdir -p ./data/otelcol && sed -i 's#\\\${env:STORAGE_DIR}#'"$PWD"/data/otelcol'#g' ./otel.yml && sed -i 's#\\\${env:${elasticEndpointVarName}}#${ingestEndpointUrl}#g' ./otel.yml && sed -i 's/\\\${env:ELASTIC_API_KEY}/${apiKeyEncoded}/g' ./otel.yml`;
+rm ./otel.yml && cp ${sampleConfigurationPath} ./otel.yml && mkdir -p ./data/otelcol && sed -i 's#\\\${env:STORAGE_DIR}#'"$PWD"/data/otelcol'#g' ./otel.yml && sed -i 's#\\\${env:${elasticEndpointVarName}}#${ingestEndpointUrl}#g' ./otel.yml && sed -i 's/\\\${env:ELASTIC_API_KEY}/${apiKeyEncoded}/g' ./otel.yml${intervalTweakLinux} && cat > ./otel.overlay.yml <<'YAML'
+receivers:
+  hostmetrics/system:
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+          system.cpu.logical.count:
+            enabled: true
+      load:
+        metrics:
+          system.load.1:
+            enabled: true
+          system.load.5:
+            enabled: true
+          system.load.15:
+            enabled: true
+  hostmetrics:
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+          system.cpu.logical.count:
+            enabled: true
+      load:
+        metrics:
+          system.load.1:
+            enabled: true
+          system.load.5:
+            enabled: true
+          system.load.15:
+            enabled: true
+YAML`;
 
     case 'mac':
       return `arch=$(if [[ $(uname -m) == "arm64" ]]; then echo "aarch64"; else echo $(uname -m); fi)
 
 curl --output elastic-distro-${agentVersion}-darwin-$arch.tar.gz --url https://${AGENT_CDN_BASE_URL}/elastic-agent-${agentVersion}-darwin-$arch.tar.gz --proto '=https' --tlsv1.2 -fL && mkdir -p "elastic-distro-${agentVersion}-darwin-$arch" && tar -xvf elastic-distro-${agentVersion}-darwin-$arch.tar.gz -C "elastic-distro-${agentVersion}-darwin-$arch" --strip-components=1 && cd elastic-distro-${agentVersion}-darwin-$arch
 
-rm ./otel.yml && cp ${sampleConfigurationPath} ./otel.yml && mkdir -p ./data/otelcol  && sed -i '' 's#\\\${env:STORAGE_DIR}#'"$PWD"/data/otelcol'#g' ./otel.yml && sed -i '' 's#\\\${env:${elasticEndpointVarName}}#${ingestEndpointUrl}#g' ./otel.yml && sed -i '' 's/\\\${env:ELASTIC_API_KEY}/${apiKeyEncoded}/g' ./otel.yml`;
+rm ./otel.yml && cp ${sampleConfigurationPath} ./otel.yml && mkdir -p ./data/otelcol  && sed -i '' 's#\\\${env:STORAGE_DIR}#'"$PWD"/data/otelcol'#g' ./otel.yml && sed -i '' 's#\\\${env:${elasticEndpointVarName}}#${ingestEndpointUrl}#g' ./otel.yml && sed -i '' 's/\\\${env:ELASTIC_API_KEY}/${apiKeyEncoded}/g' ./otel.yml${intervalTweakMac} && cat > ./otel.overlay.yml <<'YAML'
+receivers:
+  hostmetrics/system:
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+          system.cpu.logical.count:
+            enabled: true
+      load:
+        metrics:
+          system.load.1:
+            enabled: true
+          system.load.5:
+            enabled: true
+          system.load.15:
+            enabled: true
+  hostmetrics:
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+          system.cpu.logical.count:
+            enabled: true
+      load:
+        metrics:
+          system.load.1:
+            enabled: true
+          system.load.5:
+            enabled: true
+          system.load.15:
+            enabled: true
+YAML`;
   }
 }

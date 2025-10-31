@@ -115,7 +115,7 @@ export const OtelLogsPanel: React.FC = () => {
             agentVersion: setupData.elasticAgentVersionInfo.agentVersion,
           })
         : '',
-      start: 'sudo ./otelcol --config otel.yml',
+      start: 'sudo ./otelcol --config otel.yml --config otel.overlay.yml',
       type: 'copy',
     },
     {
@@ -133,7 +133,7 @@ export const OtelLogsPanel: React.FC = () => {
             agentVersion: setupData.elasticAgentVersionInfo.agentVersion,
           })
         : '',
-      start: './otelcol --config otel.yml',
+      start: './otelcol --config otel.yml --config otel.overlay.yml',
       type: 'copy',
     },
   ];
