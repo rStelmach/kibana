@@ -34,8 +34,13 @@ describe('buildInstallCommand()', () => {
 curl --output elastic-distro-${agentVersion}-linux-$arch.tar.gz --url https://${AGENT_CDN_BASE_URL}/elastic-agent-${agentVersion}-linux-$arch.tar.gz --proto '=https' --tlsv1.2 -fL && mkdir -p elastic-distro-${agentVersion}-linux-$arch && tar -xvf elastic-distro-${agentVersion}-linux-$arch.tar.gz -C "elastic-distro-${agentVersion}-linux-$arch" --strip-components=1 && cd elastic-distro-${agentVersion}-linux-$arch
 
 rm ./otel.yml && cp ./otel_samples/platformlogs_hostmetrics.yml ./otel.yml && mkdir -p ./data/otelcol && sed -i 's#\\\${env:STORAGE_DIR}#'"$PWD"/data/otelcol'#g' ./otel.yml && sed -i 's#\\\${env:ELASTIC_ENDPOINT}#${elasticsearchUrl}#g' ./otel.yml && sed -i 's/\\\${env:ELASTIC_API_KEY}/${apiKeyEncoded}/g' ./otel.yml && sed -i 's/collection_interval: 60s/collection_interval: 15s/' ./otel.yml && cat > ./otel.overlay.yml <<'YAML'
+service:
+  telemetry:
+    logs:
+      level: debug
 receivers:
   hostmetrics/system:
+    collection_interval: 15s
     scrapers:
       cpu:
         metrics:
@@ -52,6 +57,7 @@ receivers:
           system.load.15:
             enabled: true
   hostmetrics:
+    collection_interval: 15s
     scrapers:
       cpu:
         metrics:
@@ -118,8 +124,13 @@ rm ./otel.yml && cp ./otel_samples/platformlogs.yml ./otel.yml && mkdir -p ./dat
 curl --output elastic-distro-${agentVersion}-linux-$arch.tar.gz --url https://${AGENT_CDN_BASE_URL}/elastic-agent-${agentVersion}-linux-$arch.tar.gz --proto '=https' --tlsv1.2 -fL && mkdir -p elastic-distro-${agentVersion}-linux-$arch && tar -xvf elastic-distro-${agentVersion}-linux-$arch.tar.gz -C "elastic-distro-${agentVersion}-linux-$arch" --strip-components=1 && cd elastic-distro-${agentVersion}-linux-$arch
 
 rm ./otel.yml && cp ./otel_samples/managed_otlp/platformlogs_hostmetrics.yml ./otel.yml && mkdir -p ./data/otelcol && sed -i 's#\\\${env:STORAGE_DIR}#'"$PWD"/data/otelcol'#g' ./otel.yml && sed -i 's#\\\${env:ELASTIC_OTLP_ENDPOINT}#${managedOtlpServiceUrl}#g' ./otel.yml && sed -i 's/\\\${env:ELASTIC_API_KEY}/${apiKeyEncoded}/g' ./otel.yml && sed -i 's/collection_interval: 60s/collection_interval: 15s/' ./otel.yml && cat > ./otel.overlay.yml <<'YAML'
+service:
+  telemetry:
+    logs:
+      level: debug
 receivers:
   hostmetrics/system:
+    collection_interval: 15s
     scrapers:
       cpu:
         metrics:
@@ -136,6 +147,7 @@ receivers:
           system.load.15:
             enabled: true
   hostmetrics:
+    collection_interval: 15s
     scrapers:
       cpu:
         metrics:
@@ -177,8 +189,13 @@ YAML`);
 curl --output elastic-distro-${agentVersion}-linux-$arch.tar.gz --url https://${AGENT_CDN_BASE_URL}/elastic-agent-${agentVersion}-linux-$arch.tar.gz --proto '=https' --tlsv1.2 -fL && mkdir -p elastic-distro-${agentVersion}-linux-$arch && tar -xvf elastic-distro-${agentVersion}-linux-$arch.tar.gz -C "elastic-distro-${agentVersion}-linux-$arch" --strip-components=1 && cd elastic-distro-${agentVersion}-linux-$arch
 
 rm ./otel.yml && cp ./otel_samples/managed_otlp/platformlogs_hostmetrics.yml ./otel.yml && mkdir -p ./data/otelcol && sed -i 's#\\\${env:STORAGE_DIR}#'"$PWD"/data/otelcol'#g' ./otel.yml && sed -i 's#\\\${env:ELASTIC_OTLP_ENDPOINT}#${managedOtlpServiceUrl}#g' ./otel.yml && sed -i 's/\\\${env:ELASTIC_API_KEY}/${apiKeyEncoded}/g' ./otel.yml && sed -i 's/collection_interval: 60s/collection_interval: 15s/' ./otel.yml && cat > ./otel.overlay.yml <<'YAML'
+service:
+  telemetry:
+    logs:
+      level: debug
 receivers:
   hostmetrics/system:
+    collection_interval: 15s
     scrapers:
       cpu:
         metrics:
@@ -195,6 +212,7 @@ receivers:
           system.load.15:
             enabled: true
   hostmetrics:
+    collection_interval: 15s
     scrapers:
       cpu:
         metrics:
