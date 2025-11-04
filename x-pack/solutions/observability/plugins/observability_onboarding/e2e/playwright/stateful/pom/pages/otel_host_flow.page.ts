@@ -24,6 +24,10 @@ export class OtelHostFlowPage {
     await this.page.getByTestId('observabilityOnboardingOtelLogsPanelButton').click();
   }
 
+  public async selectPlatform(platform: 'Linux' | 'Mac') {
+    await this.page.getByRole('button', { name: platform }).click();
+  }
+
   public async copyCollectorStartSnippetToClipboard() {
     await this.page
       .getByTestId('observabilityOnboardingCopyableCodeBlockCopyToClipboardButton')
