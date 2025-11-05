@@ -35,6 +35,7 @@ export class OtelHostFlowPage {
   }
 
   public async clickHostsOverviewCTA() {
+    await expect(this.exploreMetricsButton).toBeVisible({ timeout: 60_000 });
     await this.exploreMetricsButton.click();
   }
 
