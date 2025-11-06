@@ -50,7 +50,7 @@ export const memoryUsage: SchemaBasedFormula = {
   value: {
     ecs: 'average(system.memory.actual.used.pct)',
     semconv:
-      "average(system.memory.utilization, kql='state: used') + average(system.memory.utilization, kql='state: buffered') + average(system.memory.utilization, kql='state: slab_reclaimable') + average(system.memory.utilization, kql='state: slab_unreclaimable')",
+      "average(system.memory.utilization, kql='data_stream.dataset: hostmetricsreceiver.otel and (state: used or attributes.state: used)')",
   },
   format: 'percent',
 

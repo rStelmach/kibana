@@ -111,7 +111,7 @@ export const cpuUsage: SchemaBasedFormula = {
   value: {
     ecs: 'average(system.cpu.total.norm.pct)',
     semconv:
-      "1-(average(metrics.system.cpu.utilization,kql='state: idle') + average(metrics.system.cpu.utilization,kql='state: wait'))",
+      "1 - average(system.cpu.utilization,kql='data_stream.dataset: hostmetricsreceiver.otel and (state: idle or attributes.state: idle)')",
   },
   format: 'percent',
   decimals: 0,
