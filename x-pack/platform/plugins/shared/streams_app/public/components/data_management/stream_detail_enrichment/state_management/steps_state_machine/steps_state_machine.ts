@@ -55,6 +55,29 @@ export const stepMachine = setup({
         };
       }
     ),
+    changeDescription: assign(
+      (
+        { context },
+        params: {
+          description?: string;
+        }
+      ) => {
+        const trimmedDescription = params.description?.trim();
+        const nextStep = { ...context.step };
+
+        if (!trimmedDescription) {
+          delete (nextStep as any).description;
+        } else {
+          (nextStep as any).description = trimmedDescription;
+        }
+
+        return {
+          step: nextStep,
+          previousStep: context.step,
+          isUpdated: true,
+        };
+      }
+    ),
     resetToPrevious: assign(({ context }) => ({
       step: context.previousStep,
     })),
@@ -114,6 +137,12 @@ export const stepMachine = setup({
             { type: 'forwardChangeEventToParent' },
           ],
         },
+        'step.changeDescription': {
+          actions: [
+            { type: 'changeDescription', params: ({ event }) => event },
+            { type: 'forwardChangeEventToParent' },
+          ],
+        },
       },
     },
     configured: {
@@ -125,6 +154,12 @@ export const stepMachine = setup({
             'step.edit': {
               target: 'editing',
               actions: [{ type: 'forwardEventToParent' }],
+            },
+            'step.changeDescription': {
+              actions: [
+                { type: 'changeDescription', params: ({ event }) => event },
+                { type: 'forwardChangeEventToParent' },
+              ],
             },
             'step.delete': '#deleted',
           },
@@ -148,6 +183,12 @@ export const stepMachine = setup({
             'step.changeCondition': {
               actions: [
                 { type: 'changeCondition', params: ({ event }) => event },
+                { type: 'forwardChangeEventToParent' },
+              ],
+            },
+            'step.changeDescription': {
+              actions: [
+                { type: 'changeDescription', params: ({ event }) => event },
                 { type: 'forwardChangeEventToParent' },
               ],
             },
