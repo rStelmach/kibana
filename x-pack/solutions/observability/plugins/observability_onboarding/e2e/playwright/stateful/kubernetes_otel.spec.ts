@@ -180,7 +180,42 @@ test('Otel Kubernetes', async ({ page, onboardingHomePage, otelKubernetesFlowPag
     debugLog(debugContent);
     debugLog('DEBUG: === END OF DEBUG OUTPUT ===');
 
-    await apmServiceInventoryPage.page.getByTestId(serviceTestId).click();
+    /**
+     * FLEXIBLE AGENT NAME HANDLING:
+     * The EDOT Java agent can report different agent.name values:
+     * - 'opentelemetry/java/elastic' (current EDOT behavior with v1.6.0+)
+     * - 'java' (legacy or native APM agent behavior)
+     *
+     * We try the OTel format first (most common now), then fall back to legacy.
+     * This handles both serverless and stateful environments consistently.
+     */
+    const primaryTestId = 'serviceLink_opentelemetry/java/elastic';
+    const fallbackTestId = 'serviceLink_java';
+
+    const primaryCount = await apmServiceInventoryPage.page
+      .getByTestId(primaryTestId)
+      .count();
+    const fallbackCount = await apmServiceInventoryPage.page
+      .getByTestId(fallbackTestId)
+      .count();
+
+    debugLog(`DEBUG: Primary testId (${primaryTestId}) count: ${primaryCount}`);
+    debugLog(`DEBUG: Fallback testId (${fallbackTestId}) count: ${fallbackCount}`);
+
+    let finalTestId: string;
+    if (primaryCount > 0) {
+      finalTestId = primaryTestId;
+      debugLog(`DEBUG: Using PRIMARY testId: ${finalTestId}`);
+    } else if (fallbackCount > 0) {
+      finalTestId = fallbackTestId;
+      debugLog(`DEBUG: Using FALLBACK testId: ${finalTestId}`);
+    } else {
+      // Neither exists - use primary and let Playwright's click() wait/fail with clear error
+      finalTestId = primaryTestId;
+      debugLog(`DEBUG: WARNING - Neither testId found! Attempting primary: ${finalTestId}`);
+    }
+
+    await apmServiceInventoryPage.page.getByTestId(finalTestId).click();
     await apmServiceInventoryPage.assertTransactionExists();
   } else {
     const discoverValidation =
