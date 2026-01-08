@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from './fixtures/base_page';
 import { assertEnv } from '../lib/assert_env';
+import { log } from '../lib/logger';
 import { OtelKubernetesOverviewDashboardPage } from './pom/pages/otel_kubernetes_overview_dashboard.page';
 import { ApmServiceInventoryPage } from './pom/pages/apm_service_inventory.page';
 
@@ -96,6 +97,51 @@ test('Otel Kubernetes', async ({ page, onboardingHomePage, otelKubernetesFlowPag
     const apmServiceInventoryPage = new ApmServiceInventoryPage(
       await otelKubernetesFlowPage.openServiceInventoryInNewTab()
     );
+    // Note: Logger to get agent.name
+    const debugLog = (msg: string) => {
+      log.info(msg);
+      console.log(msg);
+      process.stdout.write(`${msg}\n`);
+    };
+
+    debugLog('DEBUG: Collecting all serviceLink_* test IDs from Service Inventory page...');
+    const allServiceLinks = await apmServiceInventoryPage.page
+      .locator('[data-test-subj^="serviceLink_"]')
+      .all();
+    const serviceLinksDebug: string[] = [];
+    for (const link of allServiceLinks) {
+      const testId = await link.getAttribute('data-test-subj');
+      const text = await link.textContent();
+      const debugLine = `  - ${testId} (service: ${text?.trim()})`;
+      serviceLinksDebug.push(debugLine);
+      debugLog(`Found service link: ${testId} | service name: ${text?.trim()}`);
+    }
+    debugLog(`DEBUG: Total service links found: ${serviceLinksDebug.length}`);
+    debugLog(
+      `DEBUG: isServerless=${isServerless}, expected testId=${
+        isServerless ? 'serviceLink_java' : 'serviceLink_opentelemetry/java/elastic'
+      }`
+    );
+
+    const debugContent =
+      `Service Links Debug (isServerless: ${isServerless})\n` +
+      `Expected testId: ${
+        isServerless ? 'serviceLink_java' : 'serviceLink_opentelemetry/java/elastic'
+      }\n` +
+      `Found ${serviceLinksDebug.length} service links:\n${serviceLinksDebug.join('\n')}\n`;
+
+    const debugFilePath = path.join(
+      __dirname,
+      '..',
+      process.env.ARTIFACTS_FOLDER,
+      'service_links_debug.txt'
+    );
+    fs.writeFileSync(debugFilePath, debugContent);
+    debugLog(`DEBUG: Saved service links debug to ${debugFilePath}`);
+
+    debugLog('DEBUG: === FULL SERVICE LINKS DEBUG OUTPUT ===');
+    debugLog(debugContent);
+    debugLog('DEBUG: === END OF DEBUG OUTPUT ===');
 
     const serviceTestId = isServerless
       ? 'serviceLink_java'
