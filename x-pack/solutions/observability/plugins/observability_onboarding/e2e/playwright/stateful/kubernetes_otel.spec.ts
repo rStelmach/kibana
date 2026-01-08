@@ -104,6 +104,29 @@ test('Otel Kubernetes', async ({ page, onboardingHomePage, otelKubernetesFlowPag
       process.stdout.write(`${msg}\n`);
     };
 
+    const serviceTestId = isServerless
+      ? 'serviceLink_java'
+      : 'serviceLink_opentelemetry/java/elastic';
+
+    debugLog('DEBUG: Waiting for service links to appear on the page...');
+
+    /**
+     * Wait for at least one service link to appear (max 2 min)
+     * This ensures we capture the actual rendered services
+     */
+    try {
+      await apmServiceInventoryPage.page
+        .locator('[data-test-subj^="serviceLink_"]')
+        .first()
+        .waitFor({ state: 'visible', timeout: 120000 });
+      debugLog('DEBUG: At least one service link is now visible');
+    } catch {
+      debugLog('DEBUG: WARNING - No service links appeared after 2 minutes!');
+    }
+
+    // Give a bit more time for all services to render
+    await apmServiceInventoryPage.page.waitForTimeout(3000);
+
     debugLog('DEBUG: Collecting all serviceLink_* test IDs from Service Inventory page...');
     const allServiceLinks = await apmServiceInventoryPage.page
       .locator('[data-test-subj^="serviceLink_"]')
@@ -117,17 +140,31 @@ test('Otel Kubernetes', async ({ page, onboardingHomePage, otelKubernetesFlowPag
       debugLog(`Found service link: ${testId} | service name: ${text?.trim()}`);
     }
     debugLog(`DEBUG: Total service links found: ${serviceLinksDebug.length}`);
+    debugLog(`DEBUG: isServerless=${isServerless}, expected testId=${serviceTestId}`);
+
+    // Check if the expected service link exists
+    const expectedServiceExists = serviceLinksDebug.some((line) =>
+      line.includes(serviceTestId)
+    );
+    debugLog(`DEBUG: Expected service link (${serviceTestId}) exists: ${expectedServiceExists}`);
+
+    // Also check for the alternative agentName format
+    const alternativeTestId = isServerless
+      ? 'serviceLink_opentelemetry/java/elastic'
+      : 'serviceLink_java';
+    const alternativeExists = serviceLinksDebug.some((line) =>
+      line.includes(alternativeTestId)
+    );
     debugLog(
-      `DEBUG: isServerless=${isServerless}, expected testId=${
-        isServerless ? 'serviceLink_java' : 'serviceLink_opentelemetry/java/elastic'
-      }`
+      `DEBUG: Alternative service link (${alternativeTestId}) exists: ${alternativeExists}`
     );
 
     const debugContent =
       `Service Links Debug (isServerless: ${isServerless})\n` +
-      `Expected testId: ${
-        isServerless ? 'serviceLink_java' : 'serviceLink_opentelemetry/java/elastic'
-      }\n` +
+      `Expected testId: ${serviceTestId}\n` +
+      `Expected service exists: ${expectedServiceExists}\n` +
+      `Alternative testId: ${alternativeTestId}\n` +
+      `Alternative service exists: ${alternativeExists}\n` +
       `Found ${serviceLinksDebug.length} service links:\n${serviceLinksDebug.join('\n')}\n`;
 
     const debugFilePath = path.join(
@@ -142,10 +179,6 @@ test('Otel Kubernetes', async ({ page, onboardingHomePage, otelKubernetesFlowPag
     debugLog('DEBUG: === FULL SERVICE LINKS DEBUG OUTPUT ===');
     debugLog(debugContent);
     debugLog('DEBUG: === END OF DEBUG OUTPUT ===');
-
-    const serviceTestId = isServerless
-      ? 'serviceLink_java'
-      : 'serviceLink_opentelemetry/java/elastic';
 
     await apmServiceInventoryPage.page.getByTestId(serviceTestId).click();
     await apmServiceInventoryPage.assertTransactionExists();
