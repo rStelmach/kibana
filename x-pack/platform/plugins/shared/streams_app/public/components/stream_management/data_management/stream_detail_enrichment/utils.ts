@@ -47,6 +47,7 @@ import type { IngestUpsertRequest } from '@kbn/streams-schema';
 import { isEmpty, mapValues, omit } from 'lodash';
 import { PRIORITIZED_CONTENT_FIELDS, getDefaultTextField } from '@kbn/streams-plugin/common';
 import type { EnrichmentDataSource } from '../../../../../common/url_schema';
+import type { AIFeatures } from '../../../../hooks/use_ai_features';
 import type { StreamEnrichmentContextType } from './state_management/stream_enrichment_state_machine/types';
 import { configDrivenProcessors } from './steps/blocks/action/config_driven';
 import type {
@@ -147,6 +148,17 @@ export const hasValidMessageFieldsForSuggestion = (sampleDocs: FlattenRecord[]):
   // Require at least 50% of documents to have valid message fields
   return docsWithValidFields.length >= sampleDocs.length * 0.5;
 };
+
+/**
+ * Pipeline suggestions require the AI feature to be available for the tier AND enabled
+ * (enterprise license + actions capability + at least one connector) AND the samples
+ * to have valid message fields. Extracted for deterministic unit testing of the wiring
+ * between useAIFeatures and the NoStepsEmptyPrompt badge.
+ */
+export const computeCanUsePipelineSuggestions = (
+  aiFeatures: AIFeatures | null,
+  hasValidMessageFields: boolean
+): boolean => Boolean(aiFeatures && aiFeatures.enabled && hasValidMessageFields);
 
 const defaultConvertProcessorFormState = (): ConvertFormState => ({
   action: 'convert' as const,

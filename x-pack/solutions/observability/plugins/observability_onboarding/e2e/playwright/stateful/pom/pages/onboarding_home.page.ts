@@ -81,11 +81,15 @@ export class OnboardingHomePage {
   }
 
   public async maybeClickIntroducingAIAgentModalContinueBtn() {
-    try {
-      await this.introducingAIAgentModalContinueBtn.waitFor({ state: 'visible', timeout: 5000 });
-      await this.introducingAIAgentModalContinueBtn.click();
-    } catch {
-      // Modal didn't appear within timeout — continue normally
-    }
+    // The modal mounts asynchronously and can appear after navigation finishes,
+    // so a fixed-timeout waitFor races the render. Register a locator handler
+    // instead: Playwright invokes it whenever an action is blocked by the modal.
+    await this.page.addLocatorHandler(
+      this.introducingAIAgentModalContinueBtn,
+      async (btn) => {
+        await btn.click();
+      },
+      { times: 1 }
+    );
   }
 }

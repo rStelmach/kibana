@@ -11,7 +11,12 @@ import { ALWAYS_CONDITION, convertUIStepsToDSL } from '@kbn/streamlang';
 import type { Streams } from '@kbn/streams-schema';
 import { type FieldDefinition, type FlattenRecord } from '@kbn/streams-schema';
 import { omit } from 'lodash';
-import { buildUpsertStreamRequestPayload, getDefaultFormStateByType } from './utils';
+import type { AIFeatures } from '../../../../hooks/use_ai_features';
+import {
+  buildUpsertStreamRequestPayload,
+  computeCanUsePipelineSuggestions,
+  getDefaultFormStateByType,
+} from './utils';
 
 let grokCollection: GrokCollection;
 
@@ -273,6 +278,49 @@ describe('utils', () => {
         },
       },
       effective_failure_store: { disabled: {} },
+    });
+  });
+
+  describe('computeCanUsePipelineSuggestions()', () => {
+    const createAIFeatures = (overrides: Partial<AIFeatures> = {}): AIFeatures => ({
+      loading: false,
+      enabled: true,
+      couldBeEnabled: true,
+      genAiConnectors: {
+        connectors: [],
+        selectedConnector: undefined,
+        loading: false,
+        error: undefined,
+        selectConnector: jest.fn(),
+        reloadConnectors: jest.fn().mockResolvedValue(undefined),
+        isConnectorSelectionRestricted: false,
+      },
+      isManagedAIConnector: false,
+      hasAcknowledgedAdditionalCharges: false,
+      acknowledgeAdditionalCharges: jest.fn(),
+      ...overrides,
+    });
+
+    it('returns false when aiFeatures is null (tier unavailable)', () => {
+      expect(computeCanUsePipelineSuggestions(null, true)).toBe(false);
+    });
+
+    it('returns false when aiFeatures.enabled is false', () => {
+      expect(computeCanUsePipelineSuggestions(createAIFeatures({ enabled: false }), true)).toBe(
+        false
+      );
+    });
+
+    it('returns false when sample message fields are invalid', () => {
+      expect(computeCanUsePipelineSuggestions(createAIFeatures({ enabled: true }), false)).toBe(
+        false
+      );
+    });
+
+    it('returns true when aiFeatures is enabled and samples are valid', () => {
+      expect(computeCanUsePipelineSuggestions(createAIFeatures({ enabled: true }), true)).toBe(
+        true
+      );
     });
   });
 });

@@ -40,7 +40,7 @@ import {
 } from '../state_management/stream_enrichment_state_machine';
 import { selectValidationErrors } from '../state_management/stream_enrichment_state_machine/selectors';
 import { getActiveDataSourceRef } from '../state_management/stream_enrichment_state_machine/utils';
-import { hasValidMessageFieldsForSuggestion } from '../utils';
+import { computeCanUsePipelineSuggestions, hasValidMessageFieldsForSuggestion } from '../utils';
 import { RootSteps } from './root_steps';
 import { SuggestionLoadingPrompt } from '../../shared/suggestion_loading_prompt';
 
@@ -300,7 +300,10 @@ export const StepsEditor = React.memo(() => {
     definition: { stream },
   } = useStreamDetail();
 
-  const canUsePipelineSuggestions = aiFeatures && aiFeatures.enabled && hasValidMessageFields;
+  const canUsePipelineSuggestions = computeCanUsePipelineSuggestions(
+    aiFeatures,
+    hasValidMessageFields
+  );
   const canUsePipelineSuggestionsPending =
     aiFeatures !== null && (aiFeatures.loading || (aiFeatures.enabled && isLoadingSamples));
 
@@ -317,7 +320,7 @@ export const StepsEditor = React.memo(() => {
 
     if (isNoSuggestionsFound) {
       return (
-        <NoStepsEmptyPrompt canUsePipelineSuggestions={!!canUsePipelineSuggestions}>
+        <NoStepsEmptyPrompt canUsePipelineSuggestions={canUsePipelineSuggestions}>
           <div css={{ maxWidth: 400, margin: '0 auto', textAlign: 'left' }}>
             <EuiCallOut
               announceOnMount
@@ -389,8 +392,8 @@ export const StepsEditor = React.memo(() => {
         <RootSteps stepRefs={stepRefs} />
       ) : // hold off rendering empty prompt while there is a chance we will show the pipeline suggestion prompt
       !canUsePipelineSuggestions && canUsePipelineSuggestionsPending ? null : (
-        <NoStepsEmptyPrompt canUsePipelineSuggestions={!!canUsePipelineSuggestions}>
-          {canUsePipelineSuggestions && (
+        <NoStepsEmptyPrompt canUsePipelineSuggestions={canUsePipelineSuggestions}>
+          {canUsePipelineSuggestions && aiFeatures && (
             <>
               <GenerateSuggestionButton
                 aiFeatures={aiFeatures}
