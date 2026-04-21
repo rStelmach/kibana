@@ -39,10 +39,6 @@ test('Otel Kubernetes', async ({
 }) => {
   assertEnv(process.env.ARTIFACTS_FOLDER, 'ARTIFACTS_FOLDER is not defined.');
 
-  // Serverless ingest cold-start + `sleep 120` + rollout restart can exceed
-  // the default 400s budget on the full auto-instrumentation variant.
-  test.setTimeout(10 * 60_000);
-
   const isLogsEssentialsMode = process.env.LOGS_ESSENTIALS_MODE === 'true';
   const useWiredStreams = process.env.USE_WIRED_STREAMS === 'true';
   const fileName = 'code_snippet_otel_kubernetes.sh';
