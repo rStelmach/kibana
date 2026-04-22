@@ -18,6 +18,12 @@ import { assertDiscoverHasData, assertStreamHasData } from '../lib/validation_he
  * to spin up a local k8s cluster with the required resources.
  */
 
+// Diagnostic: disable playwright's own retries for this spec so each Ensemble
+// attempt is a single ~400s cycle instead of up to 3*400s. Combined with
+// Ensemble step retry: max: 1, this makes the post-failure diag capture run
+// after ~7 minutes instead of ~60. Remove once the Serverless flake is fixed.
+test.describe.configure({ retries: 0 });
+
 test.beforeEach(async ({ page, onboardingHomePage }) => {
   await page.goto(`${process.env.KIBANA_BASE_URL}/app/observabilityOnboarding`);
   await onboardingHomePage.maybeClickIntroducingAIAgentModalContinueBtn();
@@ -66,6 +72,10 @@ test('Otel Kubernetes', async ({
     });
   });
 
+  // Declared outside the try so the finally block can recover the onboarding_id
+  // embedded in the snippet for the ES state dump.
+  let codeSnippet: string | undefined;
+
   try {
     await onboardingHomePage.selectKubernetesUseCase();
     await onboardingHomePage.selectOtelKubernetesQuickstart();
@@ -79,8 +89,6 @@ test('Otel Kubernetes', async ({
 
     await otelKubernetesFlowPage.copyInstallStackSnippetToClipboard();
     const installStackSnippet = (await page.evaluate('navigator.clipboard.readText()')) as string;
-
-    let codeSnippet: string;
 
     if (!isLogsEssentialsMode && !useWiredStreams) {
       /**
@@ -168,6 +176,89 @@ test('Otel Kubernetes', async ({
   } finally {
     try {
       fs.writeFileSync(diagPath, JSON.stringify({ probes }, null, 2));
+    } catch {
+      // best-effort — don't mask the original test failure
+    }
+
+    // Best-effort ES state dump: queries ES via the Kibana Console proxy to
+    // split "OTel pipeline never delivered" from "Kibana /has-data query wrong".
+    // If counts are 0 at timeout, the pipeline is broken (managed OTLP -> ES).
+    // If counts are non-zero, /has-data logic is failing to match the data.
+    try {
+      const onboardingIdMatch = (process.env.ONBOARDING_ID ?? '').match(
+        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/
+      );
+      const snippetOnboardingId =
+        typeof codeSnippet === 'string'
+          ? codeSnippet.match(
+              /onboarding_id\.attributes\[0\]\.value=([0-9a-f-]{36})/
+            )?.[1]
+          : undefined;
+      const onboardingId = onboardingIdMatch?.[0] ?? snippetOnboardingId;
+
+      const proxy = async (esPath: string, method: 'GET' | 'POST' = 'GET', body?: unknown) => {
+        const qs = new URLSearchParams({ path: esPath, method });
+        const resp = await page.request.post(
+          `${process.env.KIBANA_BASE_URL}/api/console/proxy?${qs.toString()}`,
+          {
+            headers: { 'kbn-xsrf': 'true' },
+            data: body,
+            failOnStatusCode: false,
+          }
+        );
+        let parsed: unknown;
+        const text = await resp.text().catch(() => '<read-failed>');
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          parsed = text;
+        }
+        return { status: resp.status(), body: parsed };
+      };
+
+      const indexPatterns = [
+        'logs-*',
+        'metrics-*',
+        'logs.otel*',
+        'metrics.otel*',
+        'logs.ecs*',
+        'metrics.ecs*',
+      ];
+
+      const onboardingIdQuery = onboardingId && {
+        query: {
+          bool: {
+            should: [
+              { term: { 'fields.onboarding_id': onboardingId } },
+              { term: { 'resource.attributes.onboarding.id': onboardingId } },
+              { term: { 'labels.onboarding_id': onboardingId } },
+            ],
+            minimum_should_match: 1,
+          },
+        },
+      };
+
+      const dump = {
+        onboardingId,
+        indices: await proxy('_cat/indices/logs-*,metrics-*,logs.otel*,metrics.otel*?format=json'),
+        counts: Object.fromEntries(
+          await Promise.all(
+            indexPatterns.map(async (p) => [p, await proxy(`${p}/_count`, 'POST', { query: { match_all: {} } })])
+          )
+        ),
+        countsByOnboardingId: onboardingIdQuery
+          ? Object.fromEntries(
+              await Promise.all(
+                indexPatterns.map(async (p) => [p, await proxy(`${p}/_count`, 'POST', onboardingIdQuery)])
+              )
+            )
+          : undefined,
+        sampleLogDoc: await proxy('logs-*/_search?size=1', 'POST', { query: { match_all: {} } }),
+        sampleMetricDoc: await proxy('metrics-*/_search?size=1', 'POST', { query: { match_all: {} } }),
+      };
+
+      const esDumpPath = path.join(__dirname, '..', process.env.ARTIFACTS_FOLDER, 'es_state.json');
+      fs.writeFileSync(esDumpPath, JSON.stringify(dump, null, 2));
     } catch {
       // best-effort — don't mask the original test failure
     }
