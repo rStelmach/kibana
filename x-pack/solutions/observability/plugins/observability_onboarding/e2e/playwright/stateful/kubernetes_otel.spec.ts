@@ -72,6 +72,24 @@ test('Otel Kubernetes', async ({
     });
   });
 
+  // Probes captured while polling ES directly for APM trace documents
+  // before attempting to click the service link. Written in finally so
+  // we always have a trail, green or red. See the poll loop below the
+  // assertDataReceivedIndicator call.
+  const apmServiceName = `opentelemetry/java/elastic`;
+  const apmProbePath = path.join(
+    __dirname,
+    '..',
+    process.env.ARTIFACTS_FOLDER,
+    'apm_service_probes.json'
+  );
+  const apmProbes: Array<{
+    tMs: number;
+    status: number;
+    count: number | null;
+    found: boolean;
+  }> = [];
+
   // Declared outside the try so the finally block can recover the onboarding_id
   // embedded in the snippet for the ES state dump.
   let codeSnippet: string | undefined;
@@ -165,7 +183,75 @@ test('Otel Kubernetes', async ({
         await otelKubernetesFlowPage.openServiceInventoryInNewTab()
       );
 
-      const serviceTestId = 'serviceLink_opentelemetry/java/elastic';
+      const serviceTestId = `serviceLink_${apmServiceName}`;
+
+      // Poll ES directly for trace docs tagged with the expected service name
+      // before clicking the service link. The UI row for the service only
+      // renders once APM has indexed traces; on Serverless this can lag
+      // behind logs/metrics by several minutes. Failing here with an
+      // explicit "backend never listed the service" message is more useful
+      // than a generic locator timeout, and the probe trail written in the
+      // finally block lets us see exactly when (or whether) traces arrived.
+      const apmProbeStartedAt = Date.now();
+      const apmProbeTimeoutMs = 3 * 60_000;
+      const apmProbeIntervalMs = 3_000;
+
+      const countTracesForService = async () => {
+        const qs = new URLSearchParams({ path: 'traces-*/_count', method: 'POST' });
+        // Match both the ECS-normalized and the raw OTel resource attribute
+        // field paths — managed OTLP traces may land in either shape
+        // depending on where in the pipeline they are normalized.
+        const resp = await page.request.post(
+          `${process.env.KIBANA_BASE_URL}/api/console/proxy?${qs.toString()}`,
+          {
+            headers: { 'kbn-xsrf': 'true' },
+            data: {
+              query: {
+                bool: {
+                  should: [
+                    { term: { 'service.name': apmServiceName } },
+                    { term: { 'resource.attributes.service.name': apmServiceName } },
+                  ],
+                  minimum_should_match: 1,
+                },
+              },
+            },
+            failOnStatusCode: false,
+          }
+        );
+        const text = await resp.text().catch(() => '');
+        let count: number | null = null;
+        try {
+          const parsed = JSON.parse(text);
+          count = typeof parsed?.count === 'number' ? parsed.count : null;
+        } catch {
+          // leave count null
+        }
+        return { status: resp.status(), count };
+      };
+
+      let apmServiceFound = false;
+      while (Date.now() - apmProbeStartedAt < apmProbeTimeoutMs) {
+        const { status, count } = await countTracesForService();
+        const found = (count ?? 0) > 0;
+        apmProbes.push({
+          tMs: Date.now() - apmProbeStartedAt,
+          status,
+          count,
+          found,
+        });
+        if (found) {
+          apmServiceFound = true;
+          break;
+        }
+        await page.waitForTimeout(apmProbeIntervalMs);
+      }
+
+      if (!apmServiceFound) {
+        throw new Error(
+          `APM service '${apmServiceName}' did not appear in traces-* within ${apmProbeTimeoutMs}ms`
+        );
+      }
 
       await apmServiceInventoryPage.page.getByTestId(serviceTestId).click();
       await apmServiceInventoryPage.assertTransactionExists();
@@ -176,6 +262,15 @@ test('Otel Kubernetes', async ({
   } finally {
     try {
       fs.writeFileSync(diagPath, JSON.stringify({ probes }, null, 2));
+    } catch {
+      // best-effort — don't mask the original test failure
+    }
+
+    try {
+      fs.writeFileSync(
+        apmProbePath,
+        JSON.stringify({ serviceName: apmServiceName, probes: apmProbes }, null, 2)
+      );
     } catch {
       // best-effort — don't mask the original test failure
     }
