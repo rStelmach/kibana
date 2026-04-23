@@ -72,10 +72,9 @@ test('Otel Kubernetes', async ({
     });
   });
 
-  // Probes captured while polling ES directly for APM trace documents
-  // before attempting to click the service link. Written in finally so
-  // we always have a trail, green or red. See the poll loop below the
-  // assertDataReceivedIndicator call.
+  // Diagnostic for the APM service inventory step. Written in finally so
+  // we always have a trail, green or red. Populated by the response listener
+  // and reload loop further below.
   const apmServiceName = `opentelemetry/java/elastic`;
   const apmProbePath = path.join(
     __dirname,
@@ -83,11 +82,22 @@ test('Otel Kubernetes', async ({
     process.env.ARTIFACTS_FOLDER,
     'apm_service_probes.json'
   );
-  const apmProbes: Array<{
+  // Captured /internal/apm/services responses as the inventory UI sees them.
+  // Piggy-backing on the UI's own request avoids having to hand-construct the
+  // route's ~8 required query params, and gives us ground-truth for which
+  // {serviceName, agentName} pairs actually landed.
+  const apmServiceCalls: Array<{
     tMs: number;
     status: number;
-    hasData: boolean | null;
-    found: boolean;
+    services: Array<{ service: string; agent: string }>;
+  }> = [];
+  // One entry per reload iteration: was the expected row rendered at that
+  // point, and what was the last services list the UI had seen.
+  const apmProbeIterations: Array<{
+    tMs: number;
+    iteration: number;
+    rowFound: boolean;
+    latestServices: Array<{ service: string; agent: string }>;
   }> = [];
 
   // Declared outside the try so the finally block can recover the onboarding_id
@@ -179,92 +189,92 @@ test('Otel Kubernetes', async ({
 
       await otelKubernetesOverviewDashboardPage.assertNodesPanelNotEmpty();
 
-      const apmServiceInventoryPage = new ApmServiceInventoryPage(
-        await otelKubernetesFlowPage.openServiceInventoryInNewTab()
-      );
-
       const serviceTestId = `serviceLink_${apmServiceName}`;
 
-      // Poll the APM has_data endpoint before clicking the service link. The
-      // UI row only renders once APM has indexed at least one trace, which on
-      // Serverless can lag logs/metrics by several minutes. Throwing here with
-      // an explicit "APM never reported data" message is more useful than a
-      // generic locator timeout, and the probe trail in the finally block
-      // shows exactly when (or whether) traces arrived.
-      //
-      // We use /internal/apm/has_data (the same endpoint the UI uses to gate
-      // APM onboarding) rather than POSTing to /api/console/proxy, because
-      // the console proxy allowlist differs between stateful and Serverless
-      // and `path=traces-*/_count` returned HTTP 400 on every probe in run
-      // 24832621525. The has_data endpoint has no query params, no body, and
-      // returns `{ hasData: boolean }` for the active space.
-      const apmProbeStartedAt = Date.now();
-      const apmProbeTimeoutMs = 60_000;
-      const apmProbeIntervalMs = 3_000;
+      // Open APM inventory in a new tab, but attach a response listener for
+      // /internal/apm/services BEFORE the first navigation — otherwise we'd
+      // race the initial inventory fetch. Inlines the two-step open so the
+      // listener is in place before goto().
+      const serviceInventoryHref = await page
+        .getByTestId('observabilityOnboardingDataIngestStatusActionLink-services')
+        .getAttribute('href');
+      if (!serviceInventoryHref) {
+        throw new Error('Service inventory URL not found');
+      }
 
-      const probeApmHasData = async () => {
-        const resp = await page.request.get(
-          `${process.env.KIBANA_BASE_URL}/internal/apm/has_data`,
-          {
-            headers: {
-              'kbn-xsrf': 'true',
-              'elastic-api-version': '1',
-              'x-elastic-internal-origin': 'kibana',
-            },
-            failOnStatusCode: false,
-          }
-        );
-        const text = await resp.text().catch(() => '');
-        let hasData: boolean | null = null;
+      const apmStartedAt = Date.now();
+      const apmPage = await page.context().newPage();
+      apmPage.on('response', async (response) => {
+        if (!response.url().includes('/internal/apm/services')) return;
+        // Filter out the sub-routes (e.g. /internal/apm/services/foo/...).
+        // Only the top-level list endpoint is what the UI uses to populate rows.
+        const url = new URL(response.url());
+        if (url.pathname !== '/internal/apm/services') return;
+        let services: Array<{ service: string; agent: string }> = [];
         try {
-          const parsed = JSON.parse(text);
-          hasData = typeof parsed?.hasData === 'boolean' ? parsed.hasData : null;
+          const json = (await response.json()) as {
+            items?: Array<{ serviceName?: string; agentName?: string }>;
+          };
+          const items = Array.isArray(json?.items) ? json.items : [];
+          services = items.map((item) => ({
+            service: item?.serviceName ?? '<missing>',
+            agent: item?.agentName ?? '<missing>',
+          }));
         } catch {
-          // leave hasData null
+          // leave services empty; status alone is a useful signal
         }
-        return { status: resp.status(), hasData };
-      };
-
-      // Probe #1 doubles as a self-check: if the endpoint returns non-200,
-      // the probe is misconfigured for this environment (headers/allowlist).
-      // Fail fast with a descriptive message rather than burning the full
-      // window on nulls, which is what happened in run 24832621525.
-      const firstProbe = await probeApmHasData();
-      apmProbes.push({
-        tMs: Date.now() - apmProbeStartedAt,
-        status: firstProbe.status,
-        hasData: firstProbe.hasData,
-        found: firstProbe.hasData === true,
-      });
-      if (firstProbe.status !== 200) {
-        throw new Error(
-          `APM has_data probe misconfigured: GET /internal/apm/has_data returned ${firstProbe.status}`
-        );
-      }
-
-      let apmHasData = firstProbe.hasData === true;
-      while (!apmHasData && Date.now() - apmProbeStartedAt < apmProbeTimeoutMs) {
-        await page.waitForTimeout(apmProbeIntervalMs);
-        const { status, hasData } = await probeApmHasData();
-        apmProbes.push({
-          tMs: Date.now() - apmProbeStartedAt,
-          status,
-          hasData,
-          found: hasData === true,
+        apmServiceCalls.push({
+          tMs: Date.now() - apmStartedAt,
+          status: response.status(),
+          services,
         });
-        if (hasData === true) {
-          apmHasData = true;
-          break;
+      });
+      await apmPage.goto(serviceInventoryHref);
+      const apmServiceInventoryPage = new ApmServiceInventoryPage(apmPage);
+
+      // Reload the inventory until the expected row renders, or we hit the
+      // cap. Each iteration records whether the row was found and the last
+      // observed services list, so on red the artifact shows exactly which
+      // {service, agent} pairs did land.
+      const apmTimeoutMs = 3 * 60 * 1000;
+      const apmIterationWaitMs = 10_000;
+      let iteration = 0;
+      let rowFound = false;
+
+      while (Date.now() - apmStartedAt < apmTimeoutMs) {
+        iteration += 1;
+        try {
+          await apmPage.getByTestId(serviceTestId).waitFor({ timeout: apmIterationWaitMs });
+          rowFound = true;
+        } catch {
+          // fall through to record the iteration and reload
         }
+
+        const latestServices =
+          apmServiceCalls[apmServiceCalls.length - 1]?.services ?? [];
+        apmProbeIterations.push({
+          tMs: Date.now() - apmStartedAt,
+          iteration,
+          rowFound,
+          latestServices,
+        });
+
+        if (rowFound) break;
+        if (Date.now() - apmStartedAt >= apmTimeoutMs) break;
+        await apmPage.reload();
       }
 
-      if (!apmHasData) {
+      if (!rowFound) {
+        const latest = apmServiceCalls[apmServiceCalls.length - 1]?.services ?? [];
+        const summary = latest.length
+          ? latest.map((s) => `${s.service}|${s.agent}`).join(', ')
+          : '<none observed>';
         throw new Error(
-          `APM has_data did not return true within ${apmProbeTimeoutMs}ms`
+          `APM service row '${serviceTestId}' did not appear within ${apmTimeoutMs}ms. Last observed services: [${summary}]`
         );
       }
 
-      await apmServiceInventoryPage.page.getByTestId(serviceTestId).click();
+      await apmPage.getByTestId(serviceTestId).click();
       await apmServiceInventoryPage.assertTransactionExists();
     } else {
       await otelKubernetesFlowPage.clickExploreLogsCTA();
@@ -280,7 +290,15 @@ test('Otel Kubernetes', async ({
     try {
       fs.writeFileSync(
         apmProbePath,
-        JSON.stringify({ serviceName: apmServiceName, probes: apmProbes }, null, 2)
+        JSON.stringify(
+          {
+            serviceName: apmServiceName,
+            calls: apmServiceCalls,
+            iterations: apmProbeIterations,
+          },
+          null,
+          2
+        )
       );
     } catch {
       // best-effort — don't mask the original test failure
