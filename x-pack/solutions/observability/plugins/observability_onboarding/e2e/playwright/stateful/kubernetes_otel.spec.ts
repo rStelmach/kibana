@@ -86,7 +86,7 @@ test('Otel Kubernetes', async ({
   const apmProbes: Array<{
     tMs: number;
     status: number;
-    count: number | null;
+    hasData: boolean | null;
     found: boolean;
   }> = [];
 
@@ -185,71 +185,82 @@ test('Otel Kubernetes', async ({
 
       const serviceTestId = `serviceLink_${apmServiceName}`;
 
-      // Poll ES directly for trace docs tagged with the expected service name
-      // before clicking the service link. The UI row for the service only
-      // renders once APM has indexed traces; on Serverless this can lag
-      // behind logs/metrics by several minutes. Failing here with an
-      // explicit "backend never listed the service" message is more useful
-      // than a generic locator timeout, and the probe trail written in the
-      // finally block lets us see exactly when (or whether) traces arrived.
+      // Poll the APM has_data endpoint before clicking the service link. The
+      // UI row only renders once APM has indexed at least one trace, which on
+      // Serverless can lag logs/metrics by several minutes. Throwing here with
+      // an explicit "APM never reported data" message is more useful than a
+      // generic locator timeout, and the probe trail in the finally block
+      // shows exactly when (or whether) traces arrived.
+      //
+      // We use /internal/apm/has_data (the same endpoint the UI uses to gate
+      // APM onboarding) rather than POSTing to /api/console/proxy, because
+      // the console proxy allowlist differs between stateful and Serverless
+      // and `path=traces-*/_count` returned HTTP 400 on every probe in run
+      // 24832621525. The has_data endpoint has no query params, no body, and
+      // returns `{ hasData: boolean }` for the active space.
       const apmProbeStartedAt = Date.now();
-      const apmProbeTimeoutMs = 3 * 60_000;
+      const apmProbeTimeoutMs = 60_000;
       const apmProbeIntervalMs = 3_000;
 
-      const countTracesForService = async () => {
-        const qs = new URLSearchParams({ path: 'traces-*/_count', method: 'POST' });
-        // Match both the ECS-normalized and the raw OTel resource attribute
-        // field paths — managed OTLP traces may land in either shape
-        // depending on where in the pipeline they are normalized.
-        const resp = await page.request.post(
-          `${process.env.KIBANA_BASE_URL}/api/console/proxy?${qs.toString()}`,
+      const probeApmHasData = async () => {
+        const resp = await page.request.get(
+          `${process.env.KIBANA_BASE_URL}/internal/apm/has_data`,
           {
-            headers: { 'kbn-xsrf': 'true' },
-            data: {
-              query: {
-                bool: {
-                  should: [
-                    { term: { 'service.name': apmServiceName } },
-                    { term: { 'resource.attributes.service.name': apmServiceName } },
-                  ],
-                  minimum_should_match: 1,
-                },
-              },
+            headers: {
+              'kbn-xsrf': 'true',
+              'elastic-api-version': '1',
+              'x-elastic-internal-origin': 'kibana',
             },
             failOnStatusCode: false,
           }
         );
         const text = await resp.text().catch(() => '');
-        let count: number | null = null;
+        let hasData: boolean | null = null;
         try {
           const parsed = JSON.parse(text);
-          count = typeof parsed?.count === 'number' ? parsed.count : null;
+          hasData = typeof parsed?.hasData === 'boolean' ? parsed.hasData : null;
         } catch {
-          // leave count null
+          // leave hasData null
         }
-        return { status: resp.status(), count };
+        return { status: resp.status(), hasData };
       };
 
-      let apmServiceFound = false;
-      while (Date.now() - apmProbeStartedAt < apmProbeTimeoutMs) {
-        const { status, count } = await countTracesForService();
-        const found = (count ?? 0) > 0;
+      // Probe #1 doubles as a self-check: if the endpoint returns non-200,
+      // the probe is misconfigured for this environment (headers/allowlist).
+      // Fail fast with a descriptive message rather than burning the full
+      // window on nulls, which is what happened in run 24832621525.
+      const firstProbe = await probeApmHasData();
+      apmProbes.push({
+        tMs: Date.now() - apmProbeStartedAt,
+        status: firstProbe.status,
+        hasData: firstProbe.hasData,
+        found: firstProbe.hasData === true,
+      });
+      if (firstProbe.status !== 200) {
+        throw new Error(
+          `APM has_data probe misconfigured: GET /internal/apm/has_data returned ${firstProbe.status}`
+        );
+      }
+
+      let apmHasData = firstProbe.hasData === true;
+      while (!apmHasData && Date.now() - apmProbeStartedAt < apmProbeTimeoutMs) {
+        await page.waitForTimeout(apmProbeIntervalMs);
+        const { status, hasData } = await probeApmHasData();
         apmProbes.push({
           tMs: Date.now() - apmProbeStartedAt,
           status,
-          count,
-          found,
+          hasData,
+          found: hasData === true,
         });
-        if (found) {
-          apmServiceFound = true;
+        if (hasData === true) {
+          apmHasData = true;
           break;
         }
-        await page.waitForTimeout(apmProbeIntervalMs);
       }
 
-      if (!apmServiceFound) {
+      if (!apmHasData) {
         throw new Error(
-          `APM service '${apmServiceName}' did not appear in traces-* within ${apmProbeTimeoutMs}ms`
+          `APM has_data did not return true within ${apmProbeTimeoutMs}ms`
         );
       }
 
