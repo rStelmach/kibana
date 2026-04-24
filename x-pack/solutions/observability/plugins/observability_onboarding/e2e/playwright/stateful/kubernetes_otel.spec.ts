@@ -89,7 +89,9 @@ test('Otel Kubernetes', async ({
   const apmServiceCalls: Array<{
     tMs: number;
     status: number;
+    requestUrl: string;
     services: Array<{ service: string; agent: string }>;
+    errorBody?: string;
   }> = [];
 
   // Declared outside the try so the finally block can recover the onboarding_id
@@ -200,25 +202,40 @@ test('Otel Kubernetes', async ({
         if (!response.url().includes('/internal/apm/services')) return;
         // Filter out the sub-routes (e.g. /internal/apm/services/foo/...).
         // Only the top-level list endpoint is what the UI uses to populate rows.
-        const url = new URL(response.url());
+        const requestUrl = response.url();
+        const url = new URL(requestUrl);
         if (url.pathname !== '/internal/apm/services') return;
+        const status = response.status();
         let services: Array<{ service: string; agent: string }> = [];
-        try {
-          const json = (await response.json()) as {
-            items?: Array<{ serviceName?: string; agentName?: string }>;
-          };
-          const items = Array.isArray(json?.items) ? json.items : [];
-          services = items.map((item) => ({
-            service: item?.serviceName ?? '<missing>',
-            agent: item?.agentName ?? '<missing>',
-          }));
-        } catch {
-          // leave services empty; status alone is a useful signal
+        let errorBody: string | undefined;
+        if (status >= 400) {
+          // Capture raw text for 4xx/5xx — response.json() on an error body
+          // often throws and consumes the stream, leaving no trail.
+          try {
+            errorBody = await response.text();
+          } catch {
+            errorBody = '<read-failed>';
+          }
+        } else {
+          try {
+            const json = (await response.json()) as {
+              items?: Array<{ serviceName?: string; agentName?: string }>;
+            };
+            const items = Array.isArray(json?.items) ? json.items : [];
+            services = items.map((item) => ({
+              service: item?.serviceName ?? '<missing>',
+              agent: item?.agentName ?? '<missing>',
+            }));
+          } catch {
+            // leave services empty; status alone is a useful signal
+          }
         }
         apmServiceCalls.push({
           tMs: Date.now() - apmStartedAt,
-          status: response.status(),
+          status,
+          requestUrl,
           services,
+          ...(errorBody !== undefined ? { errorBody } : {}),
         });
       });
       await apmPage.goto(serviceInventoryHref);
@@ -236,14 +253,21 @@ test('Otel Kubernetes', async ({
       try {
         await apmPage.getByTestId(serviceTestId).waitFor({ timeout: apmTimeoutMs });
       } catch (err) {
-        const latest = apmServiceCalls[apmServiceCalls.length - 1]?.services ?? [];
+        const last = apmServiceCalls[apmServiceCalls.length - 1];
+        const latest = last?.services ?? [];
         const summary = latest.length
           ? latest.map((s) => `${s.service}|${s.agent}`).join(', ')
           : '<none observed>';
+        const lastStatus = last?.status ?? '<no response>';
+        const lastErrorBody = last?.errorBody
+          ? `\nLast error body (truncated 500ch): ${last.errorBody.slice(0, 500)}`
+          : '';
         throw new Error(
           `APM service row '${serviceTestId}' did not appear within ${apmTimeoutMs}ms. ` +
             `Observed ${apmServiceCalls.length} /internal/apm/services response(s). ` +
-            `Last observed services: [${summary}]`
+            `Last status: ${lastStatus}. ` +
+            `Last observed services: [${summary}].` +
+            lastErrorBody
         );
       }
 
