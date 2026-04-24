@@ -91,14 +91,6 @@ test('Otel Kubernetes', async ({
     status: number;
     services: Array<{ service: string; agent: string }>;
   }> = [];
-  // One entry per reload iteration: was the expected row rendered at that
-  // point, and what was the last services list the UI had seen.
-  const apmProbeIterations: Array<{
-    tMs: number;
-    iteration: number;
-    rowFound: boolean;
-    latestServices: Array<{ service: string; agent: string }>;
-  }> = [];
 
   // Declared outside the try so the finally block can recover the onboarding_id
   // embedded in the snippet for the ES state dump.
@@ -232,45 +224,26 @@ test('Otel Kubernetes', async ({
       await apmPage.goto(serviceInventoryHref);
       const apmServiceInventoryPage = new ApmServiceInventoryPage(apmPage);
 
-      // Reload the inventory until the expected row renders, or we hit the
-      // cap. Each iteration records whether the row was found and the last
-      // observed services list, so on red the artifact shows exactly which
-      // {service, agent} pairs did land.
-      const apmTimeoutMs = 3 * 60 * 1000;
-      const apmIterationWaitMs = 10_000;
-      let iteration = 0;
-      let rowFound = false;
-
-      while (Date.now() - apmStartedAt < apmTimeoutMs) {
-        iteration += 1;
-        try {
-          await apmPage.getByTestId(serviceTestId).waitFor({ timeout: apmIterationWaitMs });
-          rowFound = true;
-        } catch {
-          // fall through to record the iteration and reload
-        }
-
-        const latestServices =
-          apmServiceCalls[apmServiceCalls.length - 1]?.services ?? [];
-        apmProbeIterations.push({
-          tMs: Date.now() - apmStartedAt,
-          iteration,
-          rowFound,
-          latestServices,
-        });
-
-        if (rowFound) break;
-        if (Date.now() - apmStartedAt >= apmTimeoutMs) break;
-        await apmPage.reload();
-      }
-
-      if (!rowFound) {
+      // Observation-only: single DOM poll, no reload, no retry. The APM
+      // inventory fetches /internal/apm/services exactly once on mount
+      // (useProgressiveFetcher -> useFetcher, re-fetch is gated on
+      // timeRangeId which only advances on manual refresh / filter change /
+      // refreshInterval ticks — none of which the onboarding deep-link
+      // sets). A reload would mask the race; we want it to surface red so
+      // the listener captures the mount-fetch's services list for
+      // diagnosis.
+      const apmTimeoutMs = 30_000;
+      try {
+        await apmPage.getByTestId(serviceTestId).waitFor({ timeout: apmTimeoutMs });
+      } catch (err) {
         const latest = apmServiceCalls[apmServiceCalls.length - 1]?.services ?? [];
         const summary = latest.length
           ? latest.map((s) => `${s.service}|${s.agent}`).join(', ')
           : '<none observed>';
         throw new Error(
-          `APM service row '${serviceTestId}' did not appear within ${apmTimeoutMs}ms. Last observed services: [${summary}]`
+          `APM service row '${serviceTestId}' did not appear within ${apmTimeoutMs}ms. ` +
+            `Observed ${apmServiceCalls.length} /internal/apm/services response(s). ` +
+            `Last observed services: [${summary}]`
         );
       }
 
@@ -294,7 +267,6 @@ test('Otel Kubernetes', async ({
           {
             serviceName: apmServiceName,
             calls: apmServiceCalls,
-            iterations: apmProbeIterations,
           },
           null,
           2
