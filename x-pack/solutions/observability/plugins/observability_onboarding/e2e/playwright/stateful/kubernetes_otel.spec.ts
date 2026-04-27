@@ -241,146 +241,89 @@ test('Otel Kubernetes', async ({
       await apmPage.goto(serviceInventoryHref);
       const apmServiceInventoryPage = new ApmServiceInventoryPage(apmPage);
 
-      // Observation-only: single DOM poll, no reload, no retry. The APM
-      // inventory fetches /internal/apm/services exactly once on mount
-      // (useProgressiveFetcher -> useFetcher, re-fetch is gated on
-      // timeRangeId which only advances on manual refresh / filter change /
-      // refreshInterval ticks — none of which the onboarding deep-link
-      // sets). A reload would mask the race; we want it to surface red so
-      // the listener captures the mount-fetch's services list for
-      // diagnosis.
-      const apmTimeoutMs = 30_000;
-      try {
-        await apmPage.getByTestId(serviceTestId).waitFor({ timeout: apmTimeoutMs });
-      } catch (err) {
-        const last = apmServiceCalls[apmServiceCalls.length - 1];
-        const latest = last?.services ?? [];
-        const summary = latest.length
-          ? latest.map((s) => `${s.service}|${s.agent}`).join(', ')
-          : '<none observed>';
-        const lastStatus = last?.status ?? '<no response>';
-        const lastErrorBody = last?.errorBody
-          ? `\nLast error body (truncated 500ch): ${last.errorBody.slice(0, 500)}`
-          : '';
-        throw new Error(
-          `APM service row '${serviceTestId}' did not appear within ${apmTimeoutMs}ms. ` +
-            `Observed ${apmServiceCalls.length} /internal/apm/services response(s). ` +
-            `Last status: ${lastStatus}. ` +
-            `Last observed services: [${summary}].` +
-            lastErrorBody
-        );
+    const apmServiceName = 'opentelemetry/java/elastic';
+    const apmProbePath = path.join(
+      __dirname,
+      '..',
+      process.env.ARTIFACTS_FOLDER,
+      'apm_service_probes.json'
+    );
+    const apmServiceCalls: Array<{
+      tMs: number;
+      status: number;
+      requestUrl: string;
+      services: Array<{ service: string; agent: string }>;
+      errorBody?: string;
+    }> = [];
+
+    try {
+      // Open the inventory in a new tab manually so the response listener is
+      // attached before navigation — page.on('response') only catches future
+      // events, and the inventory's mount-fetch fires immediately on goto.
+      const serviceInventoryHref = await page
+        .getByTestId('observabilityOnboardingDataIngestStatusActionLink-services')
+        .getAttribute('href');
+      if (!serviceInventoryHref) {
+        throw new Error('Service inventory URL not found');
       }
 
-      await apmPage.getByTestId(serviceTestId).click();
-      await apmServiceInventoryPage.assertTransactionExists();
-    } else {
-      await otelKubernetesFlowPage.clickExploreLogsCTA();
-      await assertDiscoverHasData(page);
-    }
-  } finally {
-    try {
-      fs.writeFileSync(diagPath, JSON.stringify({ probes }, null, 2));
-    } catch {
-      // best-effort — don't mask the original test failure
-    }
-
-    try {
-      fs.writeFileSync(
-        apmProbePath,
-        JSON.stringify(
-          {
-            serviceName: apmServiceName,
-            calls: apmServiceCalls,
-          },
-          null,
-          2
-        )
-      );
-    } catch {
-      // best-effort — don't mask the original test failure
-    }
-
-    // Best-effort ES state dump: queries ES via the Kibana Console proxy to
-    // split "OTel pipeline never delivered" from "Kibana /has-data query wrong".
-    // If counts are 0 at timeout, the pipeline is broken (managed OTLP -> ES).
-    // If counts are non-zero, /has-data logic is failing to match the data.
-    try {
-      const onboardingIdMatch = (process.env.ONBOARDING_ID ?? '').match(
-        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/
-      );
-      const snippetOnboardingId =
-        typeof codeSnippet === 'string'
-          ? codeSnippet.match(
-              /onboarding_id\.attributes\[0\]\.value=([0-9a-f-]{36})/
-            )?.[1]
-          : undefined;
-      const onboardingId = onboardingIdMatch?.[0] ?? snippetOnboardingId;
-
-      const proxy = async (esPath: string, method: 'GET' | 'POST' = 'GET', body?: unknown) => {
-        const qs = new URLSearchParams({ path: esPath, method });
-        const resp = await page.request.post(
-          `${process.env.KIBANA_BASE_URL}/api/console/proxy?${qs.toString()}`,
-          {
-            headers: { 'kbn-xsrf': 'true' },
-            data: body,
-            failOnStatusCode: false,
+      const apmStartedAt = Date.now();
+      const apmPage = await page.context().newPage();
+      apmPage.on('response', async (response) => {
+        // Match only the top-level list endpoint, not /internal/apm/services/foo/...
+        const url = new URL(response.url());
+        if (url.pathname !== '/internal/apm/services') return;
+        const status = response.status();
+        let services: Array<{ service: string; agent: string }> = [];
+        let errorBody: string | undefined;
+        if (status >= 400) {
+          try {
+            errorBody = await response.text();
+          } catch {
+            errorBody = '<read-failed>';
           }
-        );
-        let parsed: unknown;
-        const text = await resp.text().catch(() => '<read-failed>');
-        try {
-          parsed = JSON.parse(text);
-        } catch {
-          parsed = text;
+        } else {
+          try {
+            const json = (await response.json()) as {
+              items?: Array<{ serviceName?: string; agentName?: string }>;
+            };
+            const items = Array.isArray(json?.items) ? json.items : [];
+            services = items.map((item) => ({
+              service: item?.serviceName ?? '<missing>',
+              agent: item?.agentName ?? '<missing>',
+            }));
+          } catch {
+            // leave services empty
+          }
         }
-        return { status: resp.status(), body: parsed };
-      };
+        apmServiceCalls.push({
+          tMs: Date.now() - apmStartedAt,
+          status,
+          requestUrl: response.url(),
+          services,
+          ...(errorBody !== undefined ? { errorBody } : {}),
+        });
+      });
+      await apmPage.goto(serviceInventoryHref);
+      const apmServiceInventoryPage = new ApmServiceInventoryPage(apmPage);
 
-      const indexPatterns = [
-        'logs-*',
-        'metrics-*',
-        'logs.otel*',
-        'metrics.otel*',
-        'logs.ecs*',
-        'metrics.ecs*',
-      ];
+      const serviceTestId = `serviceLink_${apmServiceName}`;
 
-      const onboardingIdQuery = onboardingId && {
-        query: {
-          bool: {
-            should: [
-              { term: { 'fields.onboarding_id': onboardingId } },
-              { term: { 'resource.attributes.onboarding.id': onboardingId } },
-              { term: { 'labels.onboarding_id': onboardingId } },
-            ],
-            minimum_should_match: 1,
-          },
-        },
-      };
-
-      const dump = {
-        onboardingId,
-        indices: await proxy('_cat/indices/logs-*,metrics-*,logs.otel*,metrics.otel*?format=json'),
-        counts: Object.fromEntries(
-          await Promise.all(
-            indexPatterns.map(async (p) => [p, await proxy(`${p}/_count`, 'POST', { query: { match_all: {} } })])
-          )
-        ),
-        countsByOnboardingId: onboardingIdQuery
-          ? Object.fromEntries(
-              await Promise.all(
-                indexPatterns.map(async (p) => [p, await proxy(`${p}/_count`, 'POST', onboardingIdQuery)])
-              )
-            )
-          : undefined,
-        sampleLogDoc: await proxy('logs-*/_search?size=1', 'POST', { query: { match_all: {} } }),
-        sampleMetricDoc: await proxy('metrics-*/_search?size=1', 'POST', { query: { match_all: {} } }),
-      };
-
-      const esDumpPath = path.join(__dirname, '..', process.env.ARTIFACTS_FOLDER, 'es_state.json');
-      fs.writeFileSync(esDumpPath, JSON.stringify(dump, null, 2));
-    } catch {
-      // best-effort — don't mask the original test failure
+      await apmServiceInventoryPage.waitForServiceRow(serviceTestId);
+      await apmServiceInventoryPage.page.getByTestId(serviceTestId).click();
+      await apmServiceInventoryPage.assertTransactionExists();
+    } finally {
+      try {
+        fs.writeFileSync(
+          apmProbePath,
+          JSON.stringify({ serviceName: apmServiceName, calls: apmServiceCalls }, null, 2)
+        );
+      } catch {
+        // best-effort - don't mask the original test failure
+      }
     }
+  } else {
+    await otelKubernetesFlowPage.clickExploreLogsCTA();
+    await assertDiscoverHasData(page);
   }
 });
