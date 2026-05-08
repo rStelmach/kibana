@@ -8,6 +8,17 @@
 import { globalSetupHook } from '@kbn/scout';
 
 globalSetupHook('Setup environment for streams tests', async ({ apiServices, log }) => {
+  // Discover tests in this suite assume Data view mode. In MKI QA the
+  // `discover.isEsqlDefault` feature flag is enabled, which makes the
+  // observability root profile boot Discover into ES|QL and hide the
+  // data-view switcher. Mirrors PR #267910 in the Discover Scout suite.
+  log.debug('[setup] turning off discover.isEsqlDefault');
+  await apiServices.core.settings({
+    'feature_flags.overrides': {
+      'discover.isEsqlDefault': false,
+    },
+  });
+
   log.debug('[setup] Enabling streams...');
   await apiServices.streams.enable();
 });
