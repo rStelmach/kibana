@@ -1488,6 +1488,13 @@ paths:
                   description: Configuration settings for the agent.
                   type: object
                   properties:
+                    connector_ids:
+                      description: Array of connector IDs to associate with the agent.
+                      items:
+                        description: Connector ID to associate with the agent.
+                        type: string
+                      maxItems: 100
+                      type: array
                     enable_elastic_capabilities:
                       description: When true, enables built-in Elastic capabilities for the agent.
                       type: boolean
@@ -1976,6 +1983,13 @@ paths:
                   description: Updated configuration settings for the agent.
                   type: object
                   properties:
+                    connector_ids:
+                      description: Array of connector IDs to associate with the agent.
+                      items:
+                        description: Connector ID to associate with the agent.
+                        type: string
+                      maxItems: 100
+                      type: array
                     enable_elastic_capabilities:
                       description: When true, enables built-in Elastic capabilities for the agent.
                       type: boolean
@@ -73110,6 +73124,10 @@ paths:
                       maximum: 9007199254740991
                       minimum: 1
                       type: integer
+                    excludedIndexPatterns:
+                      items:
+                        type: string
+                      type: array
                     fieldHistoryLength:
                       maximum: 9007199254740991
                       minimum: -9007199254740991
@@ -73124,6 +73142,9 @@ paths:
                       maximum: 9007199254740991
                       minimum: 1
                       type: integer
+                    maxTimeWindowSize:
+                      pattern: '[smdh]$'
+                      type: string
               required:
                 - logExtraction
       responses:
@@ -80739,6 +80760,11 @@ paths:
                       maximum: 9007199254740991
                       minimum: 1
                       type: integer
+                    excludedIndexPatterns:
+                      default: []
+                      items:
+                        type: string
+                      type: array
                     fieldHistoryLength:
                       default: 10
                       maximum: 9007199254740991
@@ -80757,6 +80783,10 @@ paths:
                       maximum: 9007199254740991
                       minimum: 1
                       type: integer
+                    maxTimeWindowSize:
+                      default: 15m
+                      pattern: '[smdh]$'
+                      type: string
       responses:
         '200':
           content:
