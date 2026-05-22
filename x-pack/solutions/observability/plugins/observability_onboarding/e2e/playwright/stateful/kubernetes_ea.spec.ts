@@ -29,69 +29,143 @@ test('Kubernetes EA', async ({
   const useWiredStreams = process.env.USE_WIRED_STREAMS === 'true';
   const fileName = 'code_snippet_kubernetes.sh';
   const outputPath = path.join(__dirname, '..', process.env.ARTIFACTS_FOLDER, fileName);
+  const hasDataProbeStartedAt = Date.now();
+  const hasDataProbeFileName = 'kubernetes_ea_has_data_probes.json';
+  const hasDataProbePath = path.join(
+    __dirname,
+    '..',
+    process.env.ARTIFACTS_FOLDER,
+    hasDataProbeFileName
+  );
+  const uniqueHasDataProbePath = path.join(
+    __dirname,
+    '..',
+    process.env.ARTIFACTS_FOLDER,
+    `kubernetes_ea_has_data_probes-${hasDataProbeStartedAt}-${process.pid}.json`
+  );
+  const hasDataCalls: Array<{
+    tMs: number;
+    status: number;
+    requestUrl: string;
+    hasData?: boolean;
+    hasLogs?: boolean;
+    hasMetrics?: boolean;
+    hasPreExistingData?: boolean;
+    errorBody?: string;
+  }> = [];
 
-  await onboardingHomePage.selectKubernetesUseCase();
-  await onboardingHomePage.selectKubernetesQuickstart();
+  page.on('response', async (response) => {
+    const url = new URL(response.url());
 
-  if (useWiredStreams) {
-    await wiredStreamsSelector.selectWiredStreamsMode();
-  }
+    if (!/^\/internal\/observability_onboarding\/kubernetes\/[^/]+\/has-data$/.test(url.pathname)) {
+      return;
+    }
 
-  await kubernetesEAFlowPage.assertVisibilityCodeBlock();
-  await kubernetesEAFlowPage.copyToClipboard();
+    const status = response.status();
+    const probe: (typeof hasDataCalls)[number] = {
+      tMs: Date.now() - hasDataProbeStartedAt,
+      status,
+      requestUrl: response.url(),
+    };
 
-  const clipboardData = (await page.evaluate('navigator.clipboard.readText()')) as string;
-  /**
-   * The page waits for the browser window to loose
-   * focus as a signal to start checking for incoming data
-   */
-  await page.evaluate('window.dispatchEvent(new Event("blur"))');
+    if (status >= 400) {
+      try {
+        probe.errorBody = (await response.text()).slice(0, 1000);
+      } catch {
+        probe.errorBody = '<read-failed>';
+      }
+    } else {
+      try {
+        const json = (await response.json()) as {
+          hasData?: boolean;
+          hasLogs?: boolean;
+          hasMetrics?: boolean;
+          hasPreExistingData?: boolean;
+        };
+        probe.hasData = json.hasData;
+        probe.hasLogs = json.hasLogs;
+        probe.hasMetrics = json.hasMetrics;
+        probe.hasPreExistingData = json.hasPreExistingData;
+      } catch {
+        probe.errorBody = '<json-read-failed>';
+      }
+    }
 
-  /**
-   * Ensemble story watches for the code snippet file
-   * to be created and then executes it
-   */
-  fs.writeFileSync(outputPath, clipboardData);
+    hasDataCalls.push(probe);
+  });
 
-  /**
-   * Wired streams only reroutes logs (to logs.ecs); metrics are unaffected.
-   * So for wired streams we validate log delivery via Discover and the Streams
-   * page, and intentionally skip the Kubernetes Overview dashboard check.
-   * Dashboard validation is already covered by the non-wired test variants.
-   *
-   * The logs essentials sub-case skips the data indicator and navigates to
-   * Discover directly because the K8s EA has-data API relies on
-   * fields.onboarding_id, which is unreliable when metrics are disabled in
-   * the logs essentials tier.
-   */
-  if (useWiredStreams && !isLogsEssentialsMode) {
-    await kubernetesEAFlowPage.assertReceivedDataIndicatorKubernetes();
-    await page.waitForTimeout(2 * 60000);
-    await kubernetesEAFlowPage.clickExploreLogsCTA();
-    await assertDiscoverHasData(page, { assertHitCount: true });
-    await assertStreamHasData(page, 'logs.ecs');
-  } else if (useWiredStreams && isLogsEssentialsMode) {
-    await page.waitForTimeout(5 * 60000);
-    await page.goto(`${process.env.KIBANA_BASE_URL}/app/discover`);
-    await assertDiscoverHasData(page, { assertHitCount: true });
-    await assertStreamHasData(page, 'logs.ecs');
-  } else if (!isLogsEssentialsMode) {
-    await kubernetesEAFlowPage.assertReceivedDataIndicatorKubernetes();
+  try {
+    await onboardingHomePage.selectKubernetesUseCase();
+    await onboardingHomePage.selectKubernetesQuickstart();
+
+    if (useWiredStreams) {
+      await wiredStreamsSelector.selectWiredStreamsMode();
+    }
+
+    await kubernetesEAFlowPage.assertVisibilityCodeBlock();
+    await kubernetesEAFlowPage.copyToClipboard();
+
+    const clipboardData = (await page.evaluate('navigator.clipboard.readText()')) as string;
     /**
-     * There might be a case that dashboard still does not show
-     * the data even though it was ingested already. This usually
-     * happens during the test when navigation from the onboarding
-     * flow to the dashboard happens almost immediately.
-     * Having a timeout before going to the dashboard "solves"
-     * the issue. 2 minutes is generous and should be more then enough
-     * for the data to propagate everywhere.
+     * The page waits for the browser window to loose
+     * focus as a signal to start checking for incoming data
      */
-    await page.waitForTimeout(2 * 60000);
-    await kubernetesEAFlowPage.clickKubernetesAgentCTA();
-    await kubernetesOverviewDashboardPage.assertNodesPanelNotEmpty();
-  } else {
-    await page.waitForTimeout(5 * 60000);
-    await page.goto(`${process.env.KIBANA_BASE_URL}/app/discover`);
-    await assertDiscoverHasData(page);
+    await page.evaluate('window.dispatchEvent(new Event("blur"))');
+
+    /**
+     * Ensemble story watches for the code snippet file
+     * to be created and then executes it
+     */
+    fs.writeFileSync(outputPath, clipboardData);
+
+    /**
+     * Wired streams only reroutes logs (to logs.ecs); metrics are unaffected.
+     * So for wired streams we validate log delivery via Discover and the Streams
+     * page, and intentionally skip the Kubernetes Overview dashboard check.
+     * Dashboard validation is already covered by the non-wired test variants.
+     *
+     * The logs essentials sub-case skips the data indicator and navigates to
+     * Discover directly because the K8s EA has-data API relies on
+     * fields.onboarding_id, which is unreliable when metrics are disabled in
+     * the logs essentials tier.
+     */
+    if (useWiredStreams && !isLogsEssentialsMode) {
+      await kubernetesEAFlowPage.assertReceivedDataIndicatorKubernetes();
+      await page.waitForTimeout(2 * 60000);
+      await kubernetesEAFlowPage.clickExploreLogsCTA();
+      await assertDiscoverHasData(page, { assertHitCount: true });
+      await assertStreamHasData(page, 'logs.ecs');
+    } else if (useWiredStreams && isLogsEssentialsMode) {
+      await page.waitForTimeout(5 * 60000);
+      await page.goto(`${process.env.KIBANA_BASE_URL}/app/discover`);
+      await assertDiscoverHasData(page, { assertHitCount: true });
+      await assertStreamHasData(page, 'logs.ecs');
+    } else if (!isLogsEssentialsMode) {
+      await kubernetesEAFlowPage.assertReceivedDataIndicatorKubernetes();
+      /**
+       * There might be a case that dashboard still does not show
+       * the data even though it was ingested already. This usually
+       * happens during the test when navigation from the onboarding
+       * flow to the dashboard happens almost immediately.
+       * Having a timeout before going to the dashboard "solves"
+       * the issue. 2 minutes is generous and should be more then enough
+       * for the data to propagate everywhere.
+       */
+      await page.waitForTimeout(2 * 60000);
+      await kubernetesEAFlowPage.clickKubernetesAgentCTA();
+      await kubernetesOverviewDashboardPage.assertNodesPanelNotEmpty();
+    } else {
+      await page.waitForTimeout(5 * 60000);
+      await page.goto(`${process.env.KIBANA_BASE_URL}/app/discover`);
+      await assertDiscoverHasData(page);
+    }
+  } finally {
+    try {
+      const payload = JSON.stringify({ calls: hasDataCalls }, null, 2);
+      fs.writeFileSync(hasDataProbePath, payload);
+      fs.writeFileSync(uniqueHasDataProbePath, payload);
+    } catch {
+      // best-effort only, do not mask the original test failure
+    }
   }
 });
