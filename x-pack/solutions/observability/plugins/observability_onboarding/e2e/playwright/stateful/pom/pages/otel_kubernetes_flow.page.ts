@@ -69,9 +69,7 @@ export class OtelKubernetesFlowPage {
   }
 
   public async openServiceInventoryInNewTab(): Promise<Page> {
-    const serviceInventoryURL = await this.page
-      .getByTestId('observabilityOnboardingDataIngestStatusActionLink-services')
-      .getAttribute('href');
+    const serviceInventoryURL = await this.getServiceInventoryUrl();
 
     if (serviceInventoryURL) {
       const newPage = await this.context.newPage();
@@ -82,6 +80,12 @@ export class OtelKubernetesFlowPage {
     } else {
       throw new Error('Service inventory URL not found');
     }
+  }
+
+  public async getServiceInventoryUrl(): Promise<string | null> {
+    return await this.page
+      .getByTestId('observabilityOnboardingDataIngestStatusActionLink-services')
+      .getAttribute('href');
   }
 
   public async assertDataReceivedIndicator(): Promise<void> {

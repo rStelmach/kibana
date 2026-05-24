@@ -7,6 +7,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import type { Page } from '@playwright/test';
 import { test } from './fixtures/base_page';
 import { assertEnv } from '../lib/assert_env';
 import { OtelKubernetesOverviewDashboardPage } from './pom/pages/otel_kubernetes_overview_dashboard.page';
@@ -45,6 +46,7 @@ test('Otel Kubernetes', async ({
   const outputPath = path.join(__dirname, '..', process.env.ARTIFACTS_FOLDER, fileName);
   const hasDataProbeStartedAt = Date.now();
   const hasDataProbeFileName = 'kubernetes_otel_has_data_probes.json';
+  const apmServicesProbeFileName = 'kubernetes_otel_apm_services_probes.json';
   const hasDataProbePath = path.join(
     __dirname,
     '..',
@@ -57,6 +59,18 @@ test('Otel Kubernetes', async ({
     process.env.ARTIFACTS_FOLDER,
     `kubernetes_otel_has_data_probes-${hasDataProbeStartedAt}-${process.pid}.json`
   );
+  const apmServicesProbePath = path.join(
+    __dirname,
+    '..',
+    process.env.ARTIFACTS_FOLDER,
+    apmServicesProbeFileName
+  );
+  const uniqueApmServicesProbePath = path.join(
+    __dirname,
+    '..',
+    process.env.ARTIFACTS_FOLDER,
+    `kubernetes_otel_apm_services_probes-${hasDataProbeStartedAt}-${process.pid}.json`
+  );
   const hasDataCalls: Array<{
     tMs: number;
     status: number;
@@ -65,6 +79,17 @@ test('Otel Kubernetes', async ({
     hasLogs?: boolean;
     hasMetrics?: boolean;
     hasPreExistingData?: boolean;
+    errorBody?: string;
+  }> = [];
+  const apmServicesCalls: Array<{
+    tMs: number;
+    status: number;
+    requestUrl: string;
+    services?: Array<{
+      serviceName?: string;
+      agentName?: string;
+      transactionType?: string;
+    }>;
     errorBody?: string;
   }> = [];
 
@@ -107,6 +132,57 @@ test('Otel Kubernetes', async ({
 
     hasDataCalls.push(probe);
   });
+
+  const recordApmServicesResponses = (apmPage: Page) => {
+    apmPage.on('response', async (response) => {
+      const url = new URL(response.url());
+
+      if (url.pathname !== '/internal/apm/services') {
+        return;
+      }
+
+      const status = response.status();
+      const probe: (typeof apmServicesCalls)[number] = {
+        tMs: Date.now() - hasDataProbeStartedAt,
+        status,
+        requestUrl: response.url(),
+      };
+
+      if (status >= 400) {
+        try {
+          probe.errorBody = (await response.text()).slice(0, 1000);
+        } catch {
+          probe.errorBody = '<read-failed>';
+        }
+      } else {
+        try {
+          const json = (await response.json()) as {
+            items?: Array<{
+              serviceName?: string;
+              agentName?: string;
+              transactionType?: string;
+            }>;
+            services?: Array<{
+              serviceName?: string;
+              agentName?: string;
+              transactionType?: string;
+            }>;
+          };
+          probe.services = (json.items ?? json.services ?? []).map(
+            ({ serviceName, agentName, transactionType }) => ({
+              serviceName,
+              agentName,
+              transactionType,
+            })
+          );
+        } catch {
+          probe.errorBody = '<json-read-failed>';
+        }
+      }
+
+      apmServicesCalls.push(probe);
+    });
+  };
 
   try {
     await onboardingHomePage.selectKubernetesUseCase();
@@ -195,9 +271,17 @@ test('Otel Kubernetes', async ({
 
       await otelKubernetesOverviewDashboardPage.assertNodesPanelNotEmpty();
 
-      const apmServiceInventoryPage = new ApmServiceInventoryPage(
-        await otelKubernetesFlowPage.openServiceInventoryInNewTab()
-      );
+      const serviceInventoryURL = await otelKubernetesFlowPage.getServiceInventoryUrl();
+
+      if (!serviceInventoryURL) {
+        throw new Error('Service inventory URL not found');
+      }
+
+      const apmPage = await page.context().newPage();
+      recordApmServicesResponses(apmPage);
+      await apmPage.goto(serviceInventoryURL);
+
+      const apmServiceInventoryPage = new ApmServiceInventoryPage(apmPage);
 
       const serviceTestId = 'serviceLink_opentelemetry/java/elastic';
 
@@ -209,9 +293,13 @@ test('Otel Kubernetes', async ({
     }
   } finally {
     try {
-      const payload = JSON.stringify({ calls: hasDataCalls }, null, 2);
-      fs.writeFileSync(hasDataProbePath, payload);
-      fs.writeFileSync(uniqueHasDataProbePath, payload);
+      const hasDataPayload = JSON.stringify({ calls: hasDataCalls }, null, 2);
+      fs.writeFileSync(hasDataProbePath, hasDataPayload);
+      fs.writeFileSync(uniqueHasDataProbePath, hasDataPayload);
+
+      const apmServicesPayload = JSON.stringify({ calls: apmServicesCalls }, null, 2);
+      fs.writeFileSync(apmServicesProbePath, apmServicesPayload);
+      fs.writeFileSync(uniqueApmServicesProbePath, apmServicesPayload);
     } catch {
       // best-effort only, do not mask the original test failure
     }
