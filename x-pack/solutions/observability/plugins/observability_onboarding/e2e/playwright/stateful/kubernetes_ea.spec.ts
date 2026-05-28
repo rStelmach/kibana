@@ -10,6 +10,7 @@ import path from 'node:path';
 import { test } from './fixtures/base_page';
 import { assertEnv } from '../lib/assert_env';
 import { assertDiscoverHasData, assertStreamHasData } from '../lib/validation_helpers';
+import { createKubernetesOnboardingDiagnostics } from '../lib/kubernetes_onboarding_diagnostics';
 
 test.beforeEach(async ({ page, onboardingHomePage }) => {
   await page.goto(`${process.env.KIBANA_BASE_URL}/app/observabilityOnboarding`);
@@ -42,55 +43,22 @@ test('Kubernetes EA', async ({
     process.env.ARTIFACTS_FOLDER,
     `kubernetes_ea_has_data_probes-${hasDataProbeStartedAt}-${process.pid}.json`
   );
-  const hasDataCalls: Array<{
-    tMs: number;
-    status: number;
-    requestUrl: string;
-    hasData?: boolean;
-    hasLogs?: boolean;
-    hasMetrics?: boolean;
-    hasPreExistingData?: boolean;
-    errorBody?: string;
-  }> = [];
-
-  page.on('response', async (response) => {
-    const url = new URL(response.url());
-
-    if (!/^\/internal\/observability_onboarding\/kubernetes\/[^/]+\/has-data$/.test(url.pathname)) {
-      return;
-    }
-
-    const status = response.status();
-    const probe: (typeof hasDataCalls)[number] = {
-      tMs: Date.now() - hasDataProbeStartedAt,
-      status,
-      requestUrl: response.url(),
-    };
-
-    if (status >= 400) {
-      try {
-        probe.errorBody = (await response.text()).slice(0, 1000);
-      } catch {
-        probe.errorBody = '<read-failed>';
-      }
-    } else {
-      try {
-        const json = (await response.json()) as {
-          hasData?: boolean;
-          hasLogs?: boolean;
-          hasMetrics?: boolean;
-          hasPreExistingData?: boolean;
-        };
-        probe.hasData = json.hasData;
-        probe.hasLogs = json.hasLogs;
-        probe.hasMetrics = json.hasMetrics;
-        probe.hasPreExistingData = json.hasPreExistingData;
-      } catch {
-        probe.errorBody = '<json-read-failed>';
-      }
-    }
-
-    hasDataCalls.push(probe);
+  const readinessDiagnosticsPath = path.join(
+    __dirname,
+    '..',
+    process.env.ARTIFACTS_FOLDER,
+    'kubernetes_ea_readiness_diagnostics.json'
+  );
+  const uniqueReadinessDiagnosticsPath = path.join(
+    __dirname,
+    '..',
+    process.env.ARTIFACTS_FOLDER,
+    `kubernetes_ea_readiness_diagnostics-${hasDataProbeStartedAt}-${process.pid}.json`
+  );
+  const diagnostics = createKubernetesOnboardingDiagnostics({
+    page,
+    testName: 'Kubernetes EA',
+    flow: 'kubernetes_ea',
   });
 
   try {
@@ -105,17 +73,21 @@ test('Kubernetes EA', async ({
     await kubernetesEAFlowPage.copyToClipboard();
 
     const clipboardData = (await page.evaluate('navigator.clipboard.readText()')) as string;
+    diagnostics.recordInstallCommand(clipboardData);
+    await diagnostics.recordReadinessSnapshot('install_command_copied');
     /**
      * The page waits for the browser window to loose
      * focus as a signal to start checking for incoming data
      */
     await page.evaluate('window.dispatchEvent(new Event("blur"))');
+    await diagnostics.recordReadinessSnapshot('blur_dispatched');
 
     /**
      * Ensemble story watches for the code snippet file
      * to be created and then executes it
      */
     fs.writeFileSync(outputPath, clipboardData);
+    await diagnostics.recordReadinessSnapshot('code_snippet_written');
 
     /**
      * Wired streams only reroutes logs (to logs.ecs); metrics are unaffected.
@@ -130,6 +102,7 @@ test('Kubernetes EA', async ({
      */
     if (useWiredStreams && !isLogsEssentialsMode) {
       await kubernetesEAFlowPage.assertReceivedDataIndicatorKubernetes();
+      await diagnostics.recordReadinessSnapshot('data_received_indicator_visible');
       await page.waitForTimeout(2 * 60000);
       await kubernetesEAFlowPage.clickExploreLogsCTA();
       await assertDiscoverHasData(page, { assertHitCount: true });
@@ -141,6 +114,7 @@ test('Kubernetes EA', async ({
       await assertStreamHasData(page, 'logs.ecs');
     } else if (!isLogsEssentialsMode) {
       await kubernetesEAFlowPage.assertReceivedDataIndicatorKubernetes();
+      await diagnostics.recordReadinessSnapshot('data_received_indicator_visible');
       /**
        * There might be a case that dashboard still does not show
        * the data even though it was ingested already. This usually
@@ -160,9 +134,12 @@ test('Kubernetes EA', async ({
     }
   } finally {
     try {
-      const payload = JSON.stringify({ calls: hasDataCalls }, null, 2);
+      await diagnostics.recordReadinessSnapshot('test_finally');
+
+      const payload = JSON.stringify({ calls: diagnostics.hasDataTimeline }, null, 2);
       fs.writeFileSync(hasDataProbePath, payload);
       fs.writeFileSync(uniqueHasDataProbePath, payload);
+      diagnostics.write([readinessDiagnosticsPath, uniqueReadinessDiagnosticsPath]);
     } catch {
       // best-effort only, do not mask the original test failure
     }

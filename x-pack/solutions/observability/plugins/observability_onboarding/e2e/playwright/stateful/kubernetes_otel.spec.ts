@@ -13,6 +13,7 @@ import { assertEnv } from '../lib/assert_env';
 import { OtelKubernetesOverviewDashboardPage } from './pom/pages/otel_kubernetes_overview_dashboard.page';
 import { ApmServiceInventoryPage } from './pom/pages/apm_service_inventory.page';
 import { assertDiscoverHasData, assertStreamHasData } from '../lib/validation_helpers';
+import { createKubernetesOnboardingDiagnostics } from '../lib/kubernetes_onboarding_diagnostics';
 
 /**
  * In case you need to run this test locally, you can use https://github.com/elastic/oblt-reference-stack
@@ -57,6 +58,18 @@ test('Otel Kubernetes', async ({
     process.env.ARTIFACTS_FOLDER,
     `kubernetes_otel_has_data_probes-${hasDataProbeStartedAt}-${process.pid}.json`
   );
+  const readinessDiagnosticsPath = path.join(
+    __dirname,
+    '..',
+    process.env.ARTIFACTS_FOLDER,
+    'kubernetes_otel_readiness_diagnostics.json'
+  );
+  const uniqueReadinessDiagnosticsPath = path.join(
+    __dirname,
+    '..',
+    process.env.ARTIFACTS_FOLDER,
+    `kubernetes_otel_readiness_diagnostics-${hasDataProbeStartedAt}-${process.pid}.json`
+  );
   const apmServicesProbePath = path.join(
     __dirname,
     '..',
@@ -69,16 +82,11 @@ test('Otel Kubernetes', async ({
     process.env.ARTIFACTS_FOLDER,
     `kubernetes_otel_apm_services_probes-${hasDataProbeStartedAt}-${process.pid}.json`
   );
-  const hasDataCalls: Array<{
-    tMs: number;
-    status: number;
-    requestUrl: string;
-    hasData?: boolean;
-    hasLogs?: boolean;
-    hasMetrics?: boolean;
-    hasPreExistingData?: boolean;
-    errorBody?: string;
-  }> = [];
+  const diagnostics = createKubernetesOnboardingDiagnostics({
+    page,
+    testName: 'Otel Kubernetes',
+    flow: 'kubernetes_otel',
+  });
   const apmServicesCalls: Array<{
     tMs: number;
     status: number;
@@ -90,46 +98,6 @@ test('Otel Kubernetes', async ({
     }>;
     errorBody?: string;
   }> = [];
-
-  page.on('response', async (response) => {
-    const url = new URL(response.url());
-
-    if (!/^\/internal\/observability_onboarding\/kubernetes\/[^/]+\/has-data$/.test(url.pathname)) {
-      return;
-    }
-
-    const status = response.status();
-    const probe: (typeof hasDataCalls)[number] = {
-      tMs: Date.now() - hasDataProbeStartedAt,
-      status,
-      requestUrl: response.url(),
-    };
-
-    if (status >= 400) {
-      try {
-        probe.errorBody = (await response.text()).slice(0, 1000);
-      } catch {
-        probe.errorBody = '<read-failed>';
-      }
-    } else {
-      try {
-        const json = (await response.json()) as {
-          hasData?: boolean;
-          hasLogs?: boolean;
-          hasMetrics?: boolean;
-          hasPreExistingData?: boolean;
-        };
-        probe.hasData = json.hasData;
-        probe.hasLogs = json.hasLogs;
-        probe.hasMetrics = json.hasMetrics;
-        probe.hasPreExistingData = json.hasPreExistingData;
-      } catch {
-        probe.errorBody = '<json-read-failed>';
-      }
-    }
-
-    hasDataCalls.push(probe);
-  });
 
   const recordApmServicesResponses = (apmPage: Page) => {
     apmPage.on('response', async (response) => {
@@ -195,6 +163,8 @@ test('Otel Kubernetes', async ({
 
     await otelKubernetesFlowPage.copyInstallStackSnippetToClipboard();
     const installStackSnippet = (await page.evaluate('navigator.clipboard.readText()')) as string;
+    diagnostics.recordInstallCommand(installStackSnippet);
+    await diagnostics.recordReadinessSnapshot('install_command_copied');
 
     let codeSnippet: string;
 
@@ -227,12 +197,14 @@ test('Otel Kubernetes', async ({
      * to be created and then executes it
      */
     fs.writeFileSync(outputPath, codeSnippet);
+    await diagnostics.recordReadinessSnapshot('code_snippet_written');
 
     /**
      * The page waits for the browser window to lose
      * focus as a signal to start checking for incoming data
      */
     await page.evaluate('window.dispatchEvent(new Event("blur"))');
+    await diagnostics.recordReadinessSnapshot('blur_dispatched');
 
     /**
      * Wait for the data received indicator to appear.
@@ -241,6 +213,7 @@ test('Otel Kubernetes', async ({
      * once both logs and metrics have arrived.
      */
     await otelKubernetesFlowPage.assertDataReceivedIndicator();
+    await diagnostics.recordReadinessSnapshot('data_received_indicator_visible');
 
     /**
      * Additional buffer to ensure data has propagated
@@ -367,9 +340,12 @@ test('Otel Kubernetes', async ({
     }
   } finally {
     try {
-      const hasDataPayload = JSON.stringify({ calls: hasDataCalls }, null, 2);
+      await diagnostics.recordReadinessSnapshot('test_finally');
+
+      const hasDataPayload = JSON.stringify({ calls: diagnostics.hasDataTimeline }, null, 2);
       fs.writeFileSync(hasDataProbePath, hasDataPayload);
       fs.writeFileSync(uniqueHasDataProbePath, hasDataPayload);
+      diagnostics.write([readinessDiagnosticsPath, uniqueReadinessDiagnosticsPath]);
 
       const apmServicesPayload = JSON.stringify({ calls: apmServicesCalls }, null, 2);
       fs.writeFileSync(apmServicesProbePath, apmServicesPayload);

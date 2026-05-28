@@ -146,6 +146,12 @@ export function DataIngestStatus({
   const filteredActionLinksWithHref = filteredActionLinks.filter((actionLink) =>
     Boolean(actionLink.href)
   );
+  const actionLinkRequirements = actionLinks
+    .map((actionLink) => `${actionLink.id}:${actionLink.requires ?? 'any'}`)
+    .join('|');
+  const filteredActionLinkRequirements = filteredActionLinksWithHref
+    .map((actionLink) => `${actionLink.id}:${actionLink.requires ?? 'any'}`)
+    .join('|');
 
   const progressTitle = (() => {
     if (hasData && needsMetrics && !hasMetrics) {
@@ -171,6 +177,22 @@ export function DataIngestStatus({
 
   return (
     <>
+      <span
+        data-test-subj="observabilityOnboardingKubernetesReadinessDiagnostics"
+        data-has-data={String(hasData)}
+        data-has-logs={String(hasLogs)}
+        data-has-metrics={String(hasMetrics)}
+        data-has-pre-existing-data={String(hasPreExistingData)}
+        data-is-ready={String(isReady)}
+        data-needs-logs={String(needsLogs)}
+        data-needs-metrics={String(needsMetrics)}
+        data-respect-pre-existing-data={String(respectPreExistingData)}
+        data-status={status}
+        data-action-link-requirements={actionLinkRequirements}
+        data-filtered-action-link-requirements={filteredActionLinkRequirements}
+        hidden
+      />
+
       {!(hasPreExistingData && !hasData) && (
         <ProgressIndicator
           title={progressTitle}

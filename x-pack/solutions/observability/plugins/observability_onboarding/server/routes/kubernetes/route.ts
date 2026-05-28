@@ -40,6 +40,15 @@ export interface HasKubernetesDataRouteResponse {
   hasLogs?: boolean;
   hasMetrics?: boolean;
   hasPreExistingData?: boolean;
+  probes?: {
+    classicLogs: boolean;
+    classicMetrics: boolean;
+    wiredLogs: boolean | 'skipped';
+    wiredMetrics: boolean | 'skipped';
+    wiredQueryUsed: boolean;
+    hasPreExistingData: boolean;
+    start?: string;
+  };
 }
 
 const createKubernetesOnboardingFlowRoute = createObservabilityOnboardingServerRoute({
@@ -220,17 +229,27 @@ const hasKubernetesDataRoute = createObservabilityOnboardingServerRoute({
       const results = await Promise.allSettled(searches);
       const [logsResult, metricsResult, wiredLogsResult, wiredMetricsResult] = results;
 
-      const hasLogs =
-        resolveProbe(logsResult) || (wiredLogsResult ? resolveProbe(wiredLogsResult) : false);
-      const hasMetrics =
-        resolveProbe(metricsResult) ||
-        (wiredMetricsResult ? resolveProbe(wiredMetricsResult) : false);
+      const classicLogs = resolveProbe(logsResult);
+      const classicMetrics = resolveProbe(metricsResult);
+      const wiredLogs = wiredLogsResult ? resolveProbe(wiredLogsResult) : 'skipped';
+      const wiredMetrics = wiredMetricsResult ? resolveProbe(wiredMetricsResult) : 'skipped';
+      const hasLogs = classicLogs || wiredLogs === true;
+      const hasMetrics = classicMetrics || wiredMetrics === true;
 
       return {
         hasData: hasLogs || hasMetrics,
         hasLogs,
         hasMetrics,
         hasPreExistingData: hasPreExistingData || undefined,
+        probes: {
+          classicLogs,
+          classicMetrics,
+          wiredLogs,
+          wiredMetrics,
+          wiredQueryUsed: Boolean(wiredStreamQuery),
+          hasPreExistingData,
+          ...(start ? { start } : {}),
+        },
       };
     } catch (error) {
       if (isNoShardsAvailableError(error)) {
